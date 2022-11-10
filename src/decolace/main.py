@@ -422,6 +422,8 @@ class fowl_acquisition_area:
                 
             serialem.ManageDewarsAndPumps(1)
             serialem.Record()
+            serialem.SetImageShift(0, 0)
+
             self.state["positions_acquired"][tilt][index] = True
             counts = serialem.ReportMeanCounts()
             if counts > self.state["count_threshold_for_beamshift"]:
@@ -447,14 +449,13 @@ class fowl_acquisition_area:
             if counts < self.state["count_threshold_for_ctf"]:
                 print(f"Counts too low {counts} for ctf estimation")
                 continue
-            serialem.SetImageShift(0, 0)
             #(defocus, astigmatism, angle, shift, score,
             #    resolution) = serialem.CtfFind("A", -1, -12)
-            if self.state["ctftool"] == "ctffind":
+            if self.state["ctf_tool"] == "ctffind":
                 ctf_results = serialem.CtfFind("A", -0.1, -12)
                 self.state["defocus_calibrations"][tilt]["measurements"].append({"defocus": ctf_results[0],
                                                                             "score": ctf_results[4],
-                                                                            "fit_resolution": -1,
+                                                                            "fit_resolution": ctf_results[5],
                                                                             "nominal_defocus": serialem.ReportDefocus(),
                                                                             "specimen_x": self.state["acquisition_positions"][index][0],
                                                                             "specimen_y": self.state["acquisition_positions"][index][1],
@@ -463,17 +464,17 @@ class fowl_acquisition_area:
             
                 if ctf_results[4] > self.state["ctf_quality_threshold"] and counts > self.state["count_threshold_for_beamshift"]:
                     offset = self.state["desired_defocus"] - ctf_results[0]
-                    if offset > 0.05:
-                        offset = 0.05
+                    if offset > 0.15:
+                        offset = 0.15
                     serialem.ChangeFocus(offset)
                     print(
-                    f"Measured defocus of {ctf_results[0]}, adjusting by {offset} to get to { self.state['desired_defocus'] }")
+                    f"Measured defocus of {ctf_results[0]}, CC {ctf_results[4]}, adjusting by {offset} to get to { self.state['desired_defocus'] }")
                 else:
-                    print("Unreliable defocus, defocusing by 0.03")
+                    print(f"Unreliable defocus {ctf_results[4]}, defocusing by {self.state['ctf_step']}")
                     serialem.ChangeFocus(self.state["ctf_step"])
         
-            if self.state["ctftool"] == "ctfplotter":
-                ctf_results = serialem.Ctfplotter("A", -0.1, -12)
+            if self.state["ctf_tool"] == "ctfplotter":
+                ctf_results = serialem.Ctfplotter("A", -0.1, -12,1,0,0,126,2.0,0.168,0.3)
                 self.state["defocus_calibrations"][tilt]["measurements"].append({"defocus": ctf_results[0],
                                                                             "score": ctf_results[4],
                                                                             "fit_resolution":
@@ -484,16 +485,15 @@ class fowl_acquisition_area:
                                                                              "beamshift": serialem.ReportBeamShift()
                                                                             })
             
-                if ctf_results[4] >
-                self.state["ctf_quality_threshold_ctfplotter"]:
+                if ctf_results[4] > self.state["ctf_quality_threshold_ctfplotter"]:
                     offset = self.state["desired_defocus"] - ctf_results[0]
-                    if offset > 0.05:
-                        offset = 0.05
+                    if offset > 0.25:
+                        offset = 0.25
                     serialem.ChangeFocus(offset)
                     print(
-                    f"Measured defocus of {ctf_results[0]}, adjusting by {offset} to get to { self.state['desired_defocus'] }")
+                    f"Measured defocus of {ctf_results[0]}, CC {ctf_results[4]}, adjusting by {offset} to get to { self.state['desired_defocus'] }")
                 else:
-                    print("Unreliable defocus, defocusing by 0.03")
+                    print(f"Unreliable defocus {ctf_results[4]}, defocusing by {self.state['ctf_step']}")
                     serialem.ChangeFocus(self.state["ctf_step"])
 
     def perform_defocus_calibration(self, tilt, use_existing_tilt=False):
