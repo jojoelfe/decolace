@@ -1,6 +1,7 @@
-from decolace_processing import create_tile_metadata, read_data_from_cistem
+from decolace_processing import create_tile_metadata, read_data_from_cistem, read_decolace_data
 import typer
 from rich.console import Console
+from pathlib import Path
 console = Console()
 
 def main(
@@ -17,8 +18,11 @@ def main(
     # Read data from Cistem
     cistem_data = read_data_from_cistem(cistem_data_path)
     console.log(f"Read data about {len(cistem_data)} tiles from CisTEM project {cistem_data_path}.")
+    # Read decolace data
+    decolace_data = read_decolace_data(decolace_data_path)
     # Create tile metadata
-    create_tile_metadata(cistem_data, decolace_data_path, output_path)
+    create_tile_metadata(cistem_data, decolace_data, output_path)
+    console.log(f"Wrote tile metadata to {output_path}.")
 
 if __name__ == "__main__":
     typer.run(main)
