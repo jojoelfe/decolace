@@ -8,6 +8,15 @@ import starfile
 import mrcfile
 from skimage.transform import resize
 from rich.progress import track
+from scipy.spatial import cKDTree
+import multiprocessing 
+from functools import partial
+from skimage import filters
+from scipy.ndimage import binary_erosion
+from skimage import transform
+from scipy import optimize
+from skimage.registration._masked_phase_cross_correlation import cross_correlate_masked
+
 
 def read_data_from_cistem(database_filename: Path) -> pd.DataFrame:
     with contextlib.closing(sqlite3.connect(database_filename)) as con:
@@ -178,6 +187,11 @@ def create_montage(montage_metadata: dict, output_path_montage: Path):
         tile *= existing_mask
         mask_float *= existing_mask
         mask_montage[insertion_slice] += mask_float
+
+        # CHeck if the column tile_intensity_correction exists
+        if "tile_intensity_correction" in item:
+            tile *= item["tile_intensity_correction"]
+
         montage[insertion_slice] += tile
 
     with mrcfile.new(output_path_montage, overwrite=True) as mrc:
@@ -197,3 +211,137 @@ def adjust_metadata_for_matches(montage_data: dict, match_data: pd.DataFrame):
     merged['tile_filename'] = merged['PROJECTION_RESULT_OUTPUT_FILE']
     montage_data['tiles'] = merged
     return montage_data
+
+def find_tile_pairs(tile_data: pd.DataFrame,distance_threshold_A: float):
+    
+    points = np.array([(a["tile_image_shift_pixel_x"]*a["tile_pixel_size"],a["tile_image_shift_pixel_y"]*a["tile_pixel_size"]) for i,a in tile_data.iterrows()])
+    kd_tree = cKDTree(points)
+
+    pairs = kd_tree.query_pairs(r=distance_threshold_A)
+    row_pairs = [(tile_data.iloc[a[0]],tile_data.iloc[a[1]]) for a in pairs]
+    return row_pairs
+
+def calculate_shifts(row_pairs: list, num_proc: int = 1, erode_mask: int = 0):
+    pool = multiprocessing.Pool(processes=num_proc)
+
+    # map the worker function to the input data using the pool
+    results = pool.imap_unordered(partial(determine_shift_by_cc,erode_mask=erode_mask), row_pairs)
+    shifts = []
+    # use the rich.progress module to track the progress of the results
+    for result in track(results, total=len(row_pairs), description="Calculating shifts from pairwise cross-correlations"):
+        shifts.append(result)
+        # process the result here
+    
+    shifts = pd.DataFrame([a for a in shifts if a is not None])
+    return(shifts)
+
+def determine_shift_by_cc(doubled, 
+                          erode_mask:float=0,
+                          filter_cutoff_frequency_ratio:float=0.02,
+                          filter_order=4.0,
+                          mask_size_cutoff:int = 100,
+                          overlap_ratio:float = 0.1,
+                          ):
+    # Given the infow of two images, calculate the refined relative shifts by crosscorrelation return
+    im1, im2 = doubled
+    
+    with mrcfile.open(im1["tile_filename"]) as mrc: 
+            reference = np.copy(mrc.data[0])
+            reference = filters.butterworth(reference,cutoff_frequency_ratio=filter_cutoff_frequency_ratio,order=filter_order, high_pass=False)
+    with mrcfile.open(im2["tile_filename"]) as mrc: 
+            moving = np.copy(mrc.data[0])
+            moving = filters.butterworth(moving,cutoff_frequency_ratio=filter_cutoff_frequency_ratio,order=filter_order, high_pass=False)
+
+    diff = (im2['tile_image_shift_pixel_x']-im1['tile_image_shift_pixel_x'],im2['tile_image_shift_pixel_y']-im1['tile_image_shift_pixel_y'])
+    tform = transform.SimilarityTransform(translation=(diff[0],diff[1])).inverse
+    moving = transform.warp(moving,tform,output_shape=reference.shape)
+
+    with mrcfile.open(im1["tile_mask_filename"]) as mrc: 
+            reference_mask = np.copy(mrc.data[0])
+            reference_mask.dtype = np.uint8
+            reference_mask = reference_mask/255.0
+    with mrcfile.open(im2["tile_mask_filename"]) as mrc: 
+            moving_mask = np.copy(mrc.data[0])
+            moving_mask.dtype = np.uint8
+            moving_mask = moving_mask/255.0
+
+    if erode_mask > 0:
+        reference_mask = reference_mask > 0.5
+        moving_mask = moving_mask > 0.5
+        reference_mask = binary_erosion(reference_mask,iterations=erode_mask)
+        moving_mask = binary_erosion(moving_mask,iterations=erode_mask)
+
+    moving_mask = transform.warp(moving_mask,tform,output_shape=reference_mask.shape)
+    mask =  np.minimum(reference_mask,moving_mask) > 0.9
+    if np.sum(mask) < mask_size_cutoff:
+        return None
+    reference*= mask
+    moving *= mask 
+    
+    xcorr = cross_correlate_masked(moving, reference,
+                                   mask, mask ,
+                                   axes=tuple(range(moving.ndim)),
+                                   mode='full',
+                                   overlap_ratio=overlap_ratio)
+
+    # Generalize to the average of multiple equal maxima
+    maxima = np.stack(np.nonzero(xcorr == xcorr.max()), axis=1)
+    center = np.mean(maxima, axis=0)
+    shift = center - np.array(reference.shape) + 1
+    shift = -shift
+    
+    with np.errstate(all='raise'):
+        try:
+            ratio = np.sum(reference)/np.sum(moving)
+        except:
+            ratio = 1
+           
+    return(
+        {"shift_x":diff[0]+shift[1],
+         "shift_y":diff[1]+shift[0],
+         "initial_area":np.sum(mask),
+         "max_cc":xcorr.max(),
+         "add_shift":np.linalg.norm(shift),
+         "int_ratio":ratio,
+         "image_1":im1["tile_filename"],
+         "image_2":im2["tile_filename"]})
+
+def _position_residuals(is_pixel,index_image_1,index_image_2,shifts):
+    distance = (is_pixel[index_image_2]-is_pixel[index_image_1])-shifts
+    return(distance)
+
+
+
+def calculate_refined_image_shifts(tile_data,shifts): 
+    tile_data["filename_index"] = tile_data["tile_filename"]
+    tile_data.set_index("filename_index",inplace=True)
+    initial_pixel_coordinates = np.array([(a["tile_image_shift_pixel_x"],a["tile_image_shift_pixel_y"]) for i,a in tile_data.iterrows()])
+
+    indices_image1 = np.array([np.repeat([tile_data.index.get_loc(shift["image_1"]) for i,shift in shifts.iterrows()],2),np.tile([0,1],len(shifts)) ])
+    indices_image1 = np.ravel_multi_index(indices_image1,initial_pixel_coordinates.shape)
+    indices_image2 = np.array([np.repeat([tile_data.index.get_loc(shift["image_2"]) for i,shift in shifts.iterrows()],2),np.tile([0,1],len(shifts)) ])
+    indices_image2 = np.ravel_multi_index(indices_image2,initial_pixel_coordinates.shape)
+    shifts_array = shifts[['shift_x','shift_y']].to_numpy().flatten()
+    initial_pixel_coordinates = initial_pixel_coordinates.flatten()
+
+    res = optimize.least_squares(_position_residuals,x0=initial_pixel_coordinates,bounds=(initial_pixel_coordinates-5000,initial_pixel_coordinates+5000), args=(indices_image1,indices_image2,shifts_array))
+    new_positions = res.x.reshape(int(len(res.x)/2),2)
+    tile_data["tile_image_shift_pixel_x_original"] = tile_data["tile_image_shift_pixel_x"]
+    tile_data["tile_image_shift_pixel_y_original"] = tile_data["tile_image_shift_pixel_y"]
+    tile_data["tile_image_shift_pixel_x"] = [a[0] for a in new_positions]
+    tile_data["tile_image_shift_pixel_y"] = [a[1] for a in new_positions]
+
+def _intensity_residuals(intensity_correction,shifts,indices_image_1,indices_image_2):
+    distance = 1.0 - (np.array(shifts["int_ratio"]) * intensity_correction[indices_image_1]) / (intensity_correction[indices_image_2])
+    return(distance)
+
+def calculate_refined_intensity(tile_data,shifts):
+    intensity_correction = np.array([1.0 for i in range(len(tile_data))])
+    min_cor = np.array([0.2 for i in range(len(tile_data))])
+    max_cor = np.array([5.0 for i in range(len(tile_data))])
+    indices_image_1 = np.array([tile_data.index.get_loc(shift["image_1"]) for i,shift in shifts.iterrows()])
+    indices_image_2 = np.array([tile_data.index.get_loc(shift["image_2"]) for i,shift in shifts.iterrows()])
+
+    res = optimize.least_squares(_intensity_residuals,x0=intensity_correction,bounds=(min_cor,max_cor),args=(shifts,indices_image_1,indices_image_2))
+    tile_data["tile_intensity_correction"] = res.x
+
