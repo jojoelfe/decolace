@@ -376,7 +376,7 @@ class AcquisitionAreaSingle:
                                                                         "nominal_defocus": serialem.ReportDefocus(),
                                                                         "specimen_x": self.state["acquisition_positions"][index][0],
                                                                         "specimen_y": self.state["acquisition_positions"][index][1],
-                                                                            "beamshift": serialem.ReportBeamShift()
+                                                                        "beamshift": serialem.ReportBeamShift()
                                                                         })
         
             offset = self.state["desired_defocus"] - ctf_results[0]
