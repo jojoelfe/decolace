@@ -6,6 +6,7 @@ import sys
 sys.path.insert(0, 'C:\Program Files\SerialEM\PythonModules')
 import serialem
 import glob
+import os
 
 class grid:
     def __init__(self,name,directory, beam_radius = 100, defocus = -0.8, tilt=0.0):
@@ -100,5 +101,19 @@ class grid:
         serialem.Save()
         serialem.NewMap(0,"decolace_acquisition_map")
         self.save_navigator()
+    
+    def start_acquisition(self, initial_defocus = 24.0):
+        for aa in self.acquisition_areas:
+            serialem.LongOperation("Da","2")
+            serialem.SetFolderForFrames(os.path.join(os.path.abspath(aa.directory),"frames/"))
+            serialem.SetImageShift(0.0,0.0)
+            serialem.GoToLowDoseArea('R')
+            serialem.SetDefocus(24.0)
+            serialem.ManageDewarsAndPumps(-1)
+            while serialem.AreDewarsFilling():
+                time.sleep(60)
+            aa.acquire()
+            aa.write_to_disk()
+        serialem.SetColumnOrGunValve(0)
         
     

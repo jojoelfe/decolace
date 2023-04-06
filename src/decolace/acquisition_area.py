@@ -325,6 +325,8 @@ class AcquisitionAreaSingle:
                     serialem.SetBeamShift(initial_beamshift[0],initial_beamshift[1])
                 if initial_defocus is not None:
                     serialem.SetDefocus(initial_defocus)
+            if index % 10 == 0:
+                self.write_to_disk()
             print(f"{index+1}/{len(self.state['acquisition_positions']) }",end="")
             serialem.ImageShiftByMicrons(
                 self.state["acquisition_positions"][index][0], self.state["acquisition_positions"][index][1])
