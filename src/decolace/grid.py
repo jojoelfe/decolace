@@ -108,7 +108,7 @@ class grid:
             serialem.SetFolderForFrames(os.path.join(os.path.abspath(aa.directory),"frames/"))
             serialem.SetImageShift(0.0,0.0)
             serialem.GoToLowDoseArea('R')
-            serialem.SetDefocus(24.0)
+            serialem.SetDefocus(initial_defocus)
             serialem.ManageDewarsAndPumps(-1)
             while serialem.AreDewarsFilling():
                 time.sleep(60)

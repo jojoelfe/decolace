@@ -391,6 +391,9 @@ class AcquisitionAreaSingle:
             if abs(offset) > 0.001:
                 serialem.ChangeFocus(offset)
             print(f"✓ Adjustment: {offset} to { self.state['desired_defocus'] }")
+    
+    def move_to_position(self):
+        serialem.RealignToOtherItem(int(self.state["navigator_center_index"]),0,0,0.05,4,1)
         
         
 
