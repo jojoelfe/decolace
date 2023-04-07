@@ -107,8 +107,10 @@ class grid:
             serialem.LongOperation("Da","2")
             serialem.SetFolderForFrames(os.path.join(os.path.abspath(aa.directory),"frames/"))
             serialem.SetImageShift(0.0,0.0)
+            aa.move_to_position()
             serialem.GoToLowDoseArea('R')
             serialem.SetDefocus(initial_defocus)
+
             serialem.ManageDewarsAndPumps(-1)
             while serialem.AreDewarsFilling():
                 time.sleep(60)
