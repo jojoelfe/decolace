@@ -77,8 +77,8 @@ class AcquisitionAreaSingle:
         self.state["record_speciment_to_camera"] = None
         self.state["record_IS_to_camera"] = None
 
-        self.state["count_threshold_for_beamshift"]=800
-        self.state["count_threshold_for_ctf"]=800
+        self.state["count_threshold_for_beamshift"]=2000
+        self.state["count_threshold_for_ctf"]=2000
 
         self.state["ctf_quality_threshold"]=0.10
         self.state["ctf_res_threshold"]=10.0
@@ -222,9 +222,8 @@ class AcquisitionAreaSingle:
                         cont = False
             last_position = new_position
         self.state["acquisition_positions"] = np.array(acquisition_positions)
-        for tilt in self.state["tilts"]:
-            self.state["positions_acquired"][tilt] = np.zeros(
-                (self.state["acquisition_positions"].shape[0]), dtype='bool')
+        
+        self.state["positions_acquired"] = np.zeros(self.state["acquisition_positions"].shape[0], dtype='bool')
     
     def plot_acquisition_positions(self):
         top_left = self.state["corner_positions_specimen"][0]
@@ -238,10 +237,8 @@ class AcquisitionAreaSingle:
         plt.axes()
         plt.gca().add_patch(line)
         for i, ap in enumerate(self.state["acquisition_positions"]):
-            if i in self.state["calibration_positions"]:
-                color = "r"
-            else:
-                color = "b"
+ 
+            color = "b"
             circle = plt.Circle(
                 ap, radius=self.state["beam_radius"], fill=None, edgecolor=color)
             plt.gca().add_patch(circle)
@@ -267,7 +264,8 @@ class AcquisitionAreaSingle:
         corner_coordinates_image = []
 
         for corner in corner_coordinates:
-            corner_item = int(serialem.AddImagePosAsNavPoint( "A", corner[0], corner[1]))
+            # Inverted X and Y because they come from numpy
+            corner_item = int(serialem.AddImagePosAsNavPoint( "A", corner[1], corner[0]))
             serialem.ChangeItemColor(corner_item, 1)
 
             (ci, cx, cy, cz, ct) = serialem.ReportOtherItem(corner_item)
@@ -315,9 +313,10 @@ class AcquisitionAreaSingle:
         
     def acquire(self, established_lock=False, initial_defocus=None, initial_beamshift=None):
         print("Starting acquisition")
-
+        
 
         for index in track(range(len(self.state["acquisition_positions"]))):
+            report = ""
             if self.state["positions_acquired"][index]:
                 continue
             if index==0:
@@ -327,7 +326,7 @@ class AcquisitionAreaSingle:
                     serialem.SetDefocus(initial_defocus)
             if index % 10 == 0:
                 self.write_to_disk()
-            print(f"{index+1}/{len(self.state['acquisition_positions']) }",end="")
+            report += f"{index+1}/{len(self.state['acquisition_positions']) }"
             serialem.ImageShiftByMicrons(
                 self.state["acquisition_positions"][index][0], self.state["acquisition_positions"][index][1])
                 
@@ -337,10 +336,10 @@ class AcquisitionAreaSingle:
 
             self.state["positions_acquired"][index] = True
             counts = serialem.ReportMeanCounts()
-            print(f"Counts: {counts} ", end="")
+            report += f"Counts: {counts} "
             
             if counts > self.state["count_threshold_for_beamshift"]:
-                print(f"✓ BS", end="")
+                report += f"✓ BS"
                 measured_beam_position = serialem.MeasureBeamPosition("A")
                 beam_shift_before_centering = serialem.ReportBeamShift()
                 serialem.CenterBeamFromImage(0,0.4)
@@ -359,16 +358,22 @@ class AcquisitionAreaSingle:
                     "specimen_y": self.state["acquisition_positions"][index][1]
                     })
             else:
-                print(f"✗ BS", end="")
+               report += f"✗ BS"
 
-            if counts < self.state["count_threshold_for_ctf"] or counts>1550:
-                print(f"✗ CTF")
+            if counts < self.state["count_threshold_for_ctf"]:
+                report += f"✗ CTF"
+                print(report)
                 continue
 
             ctf_results = serialem.CtfFind("A", -0.1, -12)
-            print(f"✓ CTF: {ctf_results[0]:.2f}um DF  {ctf_results[4]:.2f}CC {ctf_results[5]:.2f}A Res", end="")
+            if len(ctf_results) < 6:
+                report += f"✗ CTF"
+                print(report)
+                continue
+            report += f"✓ CTF: {ctf_results[0]:.2f}um DF  {ctf_results[4]:.2f}CC {ctf_results[5]:.2f}A Res"
             if ctf_results[4] < self.state["ctf_quality_threshold"] or ctf_results[5] > self.state["ctf_res_threshold"]:
-                print(f"✗ Adjustment")
+                report += f"✗ Adjustment"
+                print(report)
                 continue
             self.state["defocus_calibration"]["measurements"].append({"defocus": ctf_results[0],
                                                                         "score": ctf_results[4],
@@ -390,10 +395,14 @@ class AcquisitionAreaSingle:
                 print("✓ Lock ", end="")
             if abs(offset) > 0.001:
                 serialem.ChangeFocus(offset)
-            print(f"✓ Adjustment: {offset} to { self.state['desired_defocus'] }")
+            report += f"✓ Adjustment: {offset} to { self.state['desired_defocus'] }"
+            print(report)
     
     def move_to_position(self):
-        serialem.RealignToOtherItem(int(self.state["navigator_center_index"]),0,0,0.05,4,1)
+        if self.state["navigator_center_index"] is not None:
+            serialem.RealignToOtherItem(int(self.state["navigator_center_index"]),0,0,0.05,4,1)
+        else:
+            serialem.RealignToOtherItem(int(self.state["navigator_map_index"]),0,0,0.05,4,1)
         
         
 
@@ -425,8 +434,8 @@ class acquisition_area:
             self.state["view_specimen_to_camera"] = None
             self.state["record_speciment_to_camera"] = None
             self.state["record_IS_to_camera"] = None
-            self.state["count_threshold_for_beamshift"]=800
-            self.state["count_threshold_for_ctf"]=800
+            self.state["count_threshold_for_beamshift"]=2000
+            self.state["count_threshold_for_ctf"]=2000
             self.state["ctf_quality_threshold"]=0.10
             self.state["ctf_res_threshold"]=10.0
             self.state["ctf_quality_threshold_ctfplotter"]=0.2

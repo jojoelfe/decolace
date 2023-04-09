@@ -23,6 +23,7 @@ class grid:
         self.state["view_file"] = Path(directory, f"{name}_views.mrc").as_posix()
         self.state["view_frames_directory"] = Path(directory, f"viewframes").as_posix()
         Path(self.state["view_frames_directory"]).mkdir(parents=True, exist_ok=True)
+        self.state["view_frames_directory"] = Path(self.state["view_frames_directory"]).as_posix()
     
     def save_navigator(self):
         serialem.SaveNavigator(Path(self.directory, f"{self.name}_navigator.nav").as_posix())
@@ -32,6 +33,8 @@ class grid:
         timestr = time.strftime("%Y%m%d-%H%M%S")
         filename = f"{self.name}_{timestr}.npy"
         filename = os.path.join(self.directory, filename)
+        for aa in self.acquisition_areas:
+            aa.write_to_disk()
         np.save(filename, self.state)
    
     def load_from_disk(self):
@@ -46,12 +49,18 @@ class grid:
         self.acquisition_areas = []
         for area in self.state["acquisition_areas"]:
             self.acquisition_areas.append(
-                acquisition_area.AcquisitionAreaSingle(area["name"], area["directory"])
+                acquisition_area.AcquisitionAreaSingle(area[0], area[1])
                 )
             self.acquisition_areas[-1].load_from_disk()
         
     def ensure_view_file_is_open(self):
-
+        
+        if serialem.ReportFileNumber() < 0:
+            if Path(self.state["view_file"]).exists():
+                serialem.OpenOldFile(self.state["view_file"])
+            else:
+                serialem.OpenNewFile(self.state["view_file"])
+            return
         current_file = serialem.ReportCurrentFilename()
 
         if Path(current_file).as_posix() != self.state["view_file"]:
@@ -60,9 +69,11 @@ class grid:
             else:
                 serialem.OpenNewFile(self.state["view_file"])
     
-    def eucentric(self, stage_height_offset=-33.0):
+    def eucentric(self, stage_height_offset=-33.0,do_euc=True):
+        print("Do")
         serialem.Copy('A','K')# Copy to buffer K
-        serialem.Eucentricity(1) # Rough eucentric
+        if do_euc:
+            serialem.Eucentricity(1) # Rough eucentric
         serialem.View()
         serialem.AlignTo('K')
         serialem.ResetImageShift()
@@ -88,9 +99,11 @@ class grid:
         serialem.SetExposure('V', 4)
         serialem.SetDoseFracParams('V', 1, 1, 0)
         serialem.SetFrameTime('V', 1)
-        serialem.SetFolderForFrames(self.state["view_frames_directory"])
+        serialem.SetFolderForFrames(os.path.abspath(self.state["view_frames_directory"]))
         serialem.View()
         serialem.ChangeFocus(200)
+        serialem.SetExposure('V', 1)
+        serialem.SetDoseFracParams('V', 0)
         self.ensure_view_file_is_open()
         serialem.Save()
         
@@ -102,19 +115,22 @@ class grid:
         serialem.NewMap(0,"decolace_acquisition_map")
         self.save_navigator()
     
+    
     def start_acquisition(self, initial_defocus = 24.0):
         for aa in self.acquisition_areas:
+            if np.sum(aa.state["positions_acquired"]) == len(aa.state["positions_acquired"]):
+                continue
             serialem.LongOperation("Da","2")
             serialem.SetFolderForFrames(os.path.join(os.path.abspath(aa.directory),"frames/"))
             serialem.SetImageShift(0.0,0.0)
+            
             aa.move_to_position()
             serialem.GoToLowDoseArea('R')
-            serialem.SetDefocus(initial_defocus)
 
             serialem.ManageDewarsAndPumps(-1)
             while serialem.AreDewarsFilling():
                 time.sleep(60)
-            aa.acquire()
+            aa.acquire(initial_defocus=initial_defocus)
             aa.write_to_disk()
         serialem.SetColumnOrGunValve(0)
         
