@@ -1,16 +1,20 @@
 import time
 import numpy as np
-
+from .grid import grid
+from pathlib import Path
+import os
+import glob
 
 import sys
 sys.path.insert(0, 'C:\Program Files\SerialEM\PythonModules')
 import serialem
 
 class session:
-    def __init__(self,name,directory,load_from_file=False):
+    def __init__(self,name,directory):
         self.state = {}
         self.name = name
         self.directory = directory
+        self.grids = []
 
         self.state["grids"] = []
         self.state["microscope_settings"] = {}
@@ -20,6 +24,8 @@ class session:
         filename = f"{self.name}_{timestr}.npy"
         filename = os.path.join(self.directory, filename)
         np.save(filename, self.state)
+        for grid in self.grids:
+            grid.write_to_disk()
    
     def load_from_disk(self):
         potential_files = glob.glob(os.path.join(
@@ -29,6 +35,16 @@ class session:
         most_recent = sorted(potential_files)[-1]
         print(f"Loading file {most_recent}")
         self.state = np.load(most_recent, allow_pickle=True).item()
+        for grid_info in self.state["grids"]:
+            self.grids.append(grid(grid_info[0], grid_info[1]))
+            self.grids[-1].load_from_disk()
+    
+    def add_grid(self, name):
+        self.grids.append(grid(name, Path(self.directory,name).as_posix()))
+        self.state["grids"].append([name, Path(self.directory,name).as_posix()])
+
+
+
     def add_current_setting(self, name, fringe_free=False):
 
         settings = {}
@@ -47,13 +63,3 @@ class session:
         self.state["microscope_settings"][name] = settings
 
 
-    def focus_sample_by_stage_movement(self,defocus=-5):
-        self.eucentric_z = serialem.ReportStageXYZ()[2]
-        serialem.MoveStage(0,0,30)
-        repeats = 0
-        while repeats < 20:
-            repeats += 1 
-            serialem.Preview()
-            ctf_results = serialem.CtfFind('A',-0.2,-20)
-            shift = defocus-ctf_results[0]
-            serialem.MoveStage(0,0,shift)

@@ -20,7 +20,7 @@ def main(
     # Read decolace data
     tile_data = starfile.read(tile_star_path)
     # Create montage metadata
-    montage_metadata = create_montage_metadata(tile_data, output_path_metadata, binning)
+    montage_metadata = create_montage_metadata(tile_data, output_path_metadata, binning, output_path_montage)
     console.log(f"Wrote montage metadata to {output_path_metadata}.")
     create_montage(montage_metadata, output_path_montage)
     console.log(f"Wrote {montage_metadata['montage']['montage_x_size'].values[0]}x{montage_metadata['montage']['montage_y_size'].values[0]} montage to {output_path_montage}.")

@@ -114,7 +114,7 @@ def create_tile_metadata(cistem_data: pd.DataFrame, decolace_data: dict, output_
 
     return(results)
 
-def create_montage_metadata(tile_data: pd.DataFrame, output_path_metadata: Path, binning: int):
+def create_montage_metadata(tile_data: pd.DataFrame, output_path_metadata: Path, binning: int, output_path_montage: Path):
     # Create the montage metadata
     montage_metadata =  pd.DataFrame({
         'montage_filename': pd.Series(dtype='string'),
@@ -137,7 +137,7 @@ def create_montage_metadata(tile_data: pd.DataFrame, output_path_metadata: Path,
     x_offset_binned = x_offset // binning
     y_offset_binned = y_offset // binning
 
-    montage_metadata.loc[0,"montage_filename"] = "montage.mrc"
+    montage_metadata.loc[0,"montage_filename"] = str(output_path_montage)
     montage_metadata.loc[0,"matches_montage_filename"] = "montage_matches.mrc"
     montage_metadata.loc[0,"montage_pixel_size"] = pixel_size
     montage_metadata.loc[0,"montage_binning"] = binning
@@ -344,4 +344,51 @@ def calculate_refined_intensity(tile_data,shifts):
 
     res = optimize.least_squares(_intensity_residuals,x0=intensity_correction,bounds=(min_cor,max_cor),args=(shifts,indices_image_1,indices_image_2))
     tile_data["tile_intensity_correction"] = res.x
+
+def assemble_matches(montage_info,refine_info):
+    print(montage_info["tiles"]["tile_filename"].unique()[0:10])
+    refine_info["cisTEMOriginalImageFilename"] = refine_info["cisTEMOriginalImageFilename"].str.replace("'", '')
+    print(refine_info["cisTEMOriginalImageFilename"].unique()[0:10])
+    info = montage_info["tiles"].merge(refine_info, how="inner", left_on="tile_filename", right_on="cisTEMOriginalImageFilename")
+    print(len(info.index))
+    #print(info.loc[0])
+    info["tile_x"] = info["cisTEMXShift"]
+    info["tile_y"] = info["cisTEMYShift"]
+    info["cisTEMXShift"] = info["tile_x"] + info["tile_x_offset"] 
+    info["cisTEMXShift"] = info["tile_y"] + info["tile_y_offset"] 
+    info["cisTEMOriginalImageFilename"] = montage_info["montage"]["montage_filename"].loc[0]
+    info["cisTEMPixelSize"] = montage_info["montage"]["montage_pixel_size"].loc[0]
+    #print(info["template_filename"].unique())
+    print(info["cisTEMOriginalImageFilename"].unique())
+
+    info["mask_value"] = 0.0
+    info["display"] = False
+    #Check the value of the mask at each match
+    for mask_filename in info["tile_mask_filename"].unique():
+        # Open mask and convert to 0-1 floats
+        if mask_filename == None: 
+            continue
+        with mrcfile.open(mask_filename) as mask:
+            mask_data = np.copy(mask.data[0])
+            mask_data.dtype = np.uint8
+            mask_float = mask_data/255.0
+    #    
+        peak_indices = info.loc[info["tile_mask_filename"] == mask_filename].index.tolist()
+        for i in peak_indices:
+            try:
+                info.loc[i,"mask_value"] = mask_float[int(info.loc[i,"tile_y"]/info.loc[i,"tile_pixel_size"]),int(info.loc[i,"tile_x"]/info.loc[i,"tile_pixel_size"])]
+            except IndexError:
+                info.loc[i,"mask_value"] = 0
+            if info.loc[i,"mask_value"] > 0.7:
+                info.loc[i,"display"] = True
+    # Correct for defocus and nominal focus
+    # median_defocus = info["tile_defocus"].median()
+    median_microscope_focus = info["tile_microscope_focus"].median()
+    # defocus_correction = info["tile_defocus"] - median_defocus
+    microscope_focus_correction = info["tile_microscope_focus"] - median_microscope_focus
+    # info["defocus"] += defocus_correction
+    info["cisTEMDefocus1"] = microscope_focus_correction * 10000 + info["cisTEMDefocus1"]
+    info["cisTEMDefocus2"] = microscope_focus_correction * 10000 + info["cisTEMDefocus2"]
+    # Write the new starfile
+    return info
 
