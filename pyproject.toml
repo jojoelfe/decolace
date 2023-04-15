@@ -1,10 +1,14 @@
-[tool.poetry]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
 name = "decolace"
-version = "0.0.1"
+dynamic = ["version"]
+readme = "README.md"
 description = "Python scripts to collect DeCo-LACE data using SerialEM"
 authors = ["Johannes Elferich <jojotux123@hotmail.com>"]
 license = "MIT"
-readme = "README.md"
 repository = "https://github.com/jojoelfe/decolace"
 documentation = "https://decolace.readthedocs.io"
 classifiers = [
@@ -18,34 +22,20 @@ packages = [
     { include = "decolace", from = "src" },
 ]
 
-[tool.poetry.urls]
-"Bug Tracker" = "https://github.com/jojoelfe/decolace/issues"
-"Changelog" = "https://github.com/jojoelfe/decolace/blob/main/CHANGELOG.md"
 
-[tool.poetry.dependencies]
-python = "^3.7"
 
-# Documentation Dependencies
-Sphinx = {version = "^5.0", optional = true}
-sphinx-rtd-theme = {version = "^1.0", optional = true}
-myst-parser = {version = "^0.18", optional = true}
+[tool.hatch.version]
+path = "src/decolace/__init__.py"
 
-[tool.poetry.extras]
-docs = [
-    "myst-parser",
-    "sphinx",
-    "sphinx-rtd-theme",
+[tool.hatch.build.targets.sdist]
+include = [
+    "/decolace",
 ]
+
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.0"
 pytest-cov = "^3.0"
-
-[tool.semantic_release]
-branch = "main"
-version_toml = "pyproject.toml:tool.poetry.version"
-version_variable = "src/decolace/__init__.py:__version__"
-build_command = "pip install poetry && poetry build"
 
 [tool.pytest.ini_options]
 addopts = "-v -Wdefault --cov=decolace --cov-report=term-missing:skip-covered"
@@ -88,7 +78,3 @@ allow_untyped_defs = true
 [[tool.mypy.overrides]]
 module = "docs.*"
 ignore_errors = true
-
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"

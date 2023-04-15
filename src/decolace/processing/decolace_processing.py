@@ -346,20 +346,17 @@ def calculate_refined_intensity(tile_data,shifts):
     tile_data["tile_intensity_correction"] = res.x
 
 def assemble_matches(montage_info,refine_info):
-    print(montage_info["tiles"]["tile_filename"].unique()[0:10])
     refine_info["cisTEMOriginalImageFilename"] = refine_info["cisTEMOriginalImageFilename"].str.replace("'", '')
-    print(refine_info["cisTEMOriginalImageFilename"].unique()[0:10])
     info = montage_info["tiles"].merge(refine_info, how="inner", left_on="tile_filename", right_on="cisTEMOriginalImageFilename")
-    print(len(info.index))
     #print(info.loc[0])
     info["tile_x"] = info["cisTEMXShift"]
     info["tile_y"] = info["cisTEMYShift"]
-    info["cisTEMXShift"] = info["tile_x"] + info["tile_x_offset"] 
-    info["cisTEMXShift"] = info["tile_y"] + info["tile_y_offset"] 
+    info["cisTEMXShift"] = info["tile_x"] + info["tile_image_shift_pixel_x"] * info['cisTEMPixelSize']
+
+    info["cisTEMYShift"] = info["tile_y"] + info["tile_image_shift_pixel_y"] * info['cisTEMPixelSize']
+
     info["cisTEMOriginalImageFilename"] = montage_info["montage"]["montage_filename"].loc[0]
     info["cisTEMPixelSize"] = montage_info["montage"]["montage_pixel_size"].loc[0]
-    #print(info["template_filename"].unique())
-    print(info["cisTEMOriginalImageFilename"].unique())
 
     info["mask_value"] = 0.0
     info["display"] = False
