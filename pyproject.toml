@@ -7,7 +7,7 @@ name = "decolace"
 dynamic = ["version"]
 readme = "README.md"
 description = "Python scripts to collect DeCo-LACE data using SerialEM"
-authors = ["Johannes Elferich <jojotux123@hotmail.com>"]
+authors = [{author = "Johannes Elferich", email = "jojotux123@hotmail.com"}]
 license = "MIT"
 repository = "https://github.com/jojoelfe/decolace"
 documentation = "https://decolace.readthedocs.io"
@@ -21,21 +21,22 @@ classifiers = [
 packages = [
     { include = "decolace", from = "src" },
 ]
+dependencies = [
+  "pandas",
+  "typer",
+]
 
-
+[project.scripts]
+lace_proc = "decolace.processing.cli:app"
+lace_acq = "decolace.acquisition.cli:app"
 
 [tool.hatch.version]
 path = "src/decolace/__init__.py"
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "/decolace",
+    "/src/decolace",
 ]
-
-
-[tool.poetry.dev-dependencies]
-pytest = "^7.0"
-pytest-cov = "^3.0"
 
 [tool.pytest.ini_options]
 addopts = "-v -Wdefault --cov=decolace --cov-report=term-missing:skip-covered"

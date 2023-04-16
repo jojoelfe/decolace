@@ -27,3 +27,15 @@ def create_project(project_main: Path = typer.Argument(
     project_info.to_sql('project_info', conn, if_exists='fail', index=False)
     conn.close()
     typer.echo(f"Created project file {project_main}")
+
+@app.command()
+def add_acquisition_area(project_main: Path = typer.Argument(
+        ..., help="Path to wanted project file"
+    ), ):
+    typer.echo(f"Added acquisition area to {project_main}")
+
+@app.command()
+def add_grid(project_main: Path = typer.Argument(
+        ..., help="Path to wanted project file"
+    ), ):
+    typer.echo(f"Added grid to {project_main}") 
