@@ -66,25 +66,5 @@ exclude_lines = [
 profile = "black"
 known_first_party = ["decolace", "tests"]
 
-[tool.mypy]
-check_untyped_defs = true
-disallow_any_generics = true
-disallow_incomplete_defs = true
-disallow_untyped_defs = true
-mypy_path = "src/"
-no_implicit_optional = true
-show_error_codes = true
-warn_unreachable = true
-warn_unused_ignores = true
-exclude = [
-    'docs/.*',
-    'setup.py',
-]
-
-[[tool.mypy.overrides]]
-module = "tests.*"
-allow_untyped_defs = true
-
-[[tool.mypy.overrides]]
-module = "docs.*"
-ignore_errors = true
+[tool.semantic_release]
+version_variable = "src/decolace/__init__.py:__version__"
