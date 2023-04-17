@@ -43,6 +43,7 @@ include = [
 extra-dependencies = [
   "pytest",
   "pytest-cov",
+  "pre-commit",
 ]
 
 [tool.pytest.ini_options]
