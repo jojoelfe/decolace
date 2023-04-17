@@ -1,38 +1,37 @@
-import sqlite3
-import pandas as pd
 import typer
 from pathlib import Path
+from typing import Optional
+
+from decolace.processing.project_managment import new_project, open_project
 
 app = typer.Typer()
 
 
 @app.command()
-def create_project(project_main: Path = typer.Argument(
-        ..., help="Path to wanted project file"
+def create_project(name: str = typer.Argument(
+        ..., help="Name of project"
+    ),
+    directory: Optional[Path] = typer.Argument(
+        ..., help="Directory to create project in"
     )):
 
-    # Connect to database
-    conn = sqlite3.connect(project_main)
+    if directory is None:
+        directory = Path.cwd()
+    new_project(name, directory)
 
-    # Create row with overall project information
-    project_info = pd.row({'project_name': project_main.stem, 'project_path': project_main.parent})
-
-    # Create empty dataframe with columns for acquisition_areas
-    aa_info = pd.DataFrame(columns=['name', 
-                                    'decolace_acquisition_info_path', 
-                                    'frames_folder', 
-                                    'cisTEM project', 
-                                    'initial_tile_star', ])
-    aa_info.to_sql('acquisition_areas', conn, if_exists='fail', index=False)
-    project_info.to_sql('project_info', conn, if_exists='fail', index=False)
-    conn.close()
-    typer.echo(f"Created project file {project_main}")
+   
 
 @app.command()
-def add_acquisition_area(project_main: Path = typer.Argument(
+def add_acquisition_area(
+    acquisition_area: Path = typer.Argument(
+        ..., help="Path to wanted acquisition area file"
+    ),
+    project: Union[str,Path] = typer.Option(
         ..., help="Path to wanted project file"
     ), ):
-    typer.echo(f"Added acquisition area to {project_main}")
+    open_project(project)
+    
+    typer.echo(f"Added acquisition area {aa.name} to {}")
 
 @app.command()
 def add_grid(project_main: Path = typer.Argument(
