@@ -1,9 +1,12 @@
-from decolace_processing import create_montage_metadata, create_montage
-import typer
-from rich.console import Console
 from pathlib import Path
+
 import starfile
+import typer
+from decolace_processing import create_montage, create_montage_metadata
+from rich.console import Console
+
 console = Console()
+
 
 def main(
     tile_star_path: Path = typer.Argument(
@@ -20,10 +23,15 @@ def main(
     # Read decolace data
     tile_data = starfile.read(tile_star_path)
     # Create montage metadata
-    montage_metadata = create_montage_metadata(tile_data, output_path_metadata, binning, output_path_montage)
+    montage_metadata = create_montage_metadata(
+        tile_data, output_path_metadata, binning, output_path_montage
+    )
     console.log(f"Wrote montage metadata to {output_path_metadata}.")
     create_montage(montage_metadata, output_path_montage)
-    console.log(f"Wrote {montage_metadata['montage']['montage_x_size'].values[0]}x{montage_metadata['montage']['montage_y_size'].values[0]} montage to {output_path_montage}.")
+    console.log(
+        f"Wrote {montage_metadata['montage']['montage_x_size'].values[0]}x{montage_metadata['montage']['montage_y_size'].values[0]} montage to {output_path_montage}."
+    )
+
 
 if __name__ == "__main__":
     typer.run(main)

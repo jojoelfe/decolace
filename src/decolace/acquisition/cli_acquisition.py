@@ -1,9 +1,7 @@
-import sqlite3
-import pandas as pd
 import typer
-from pathlib import Path
 
 app = typer.Typer()
+
 
 @app.command()
 def new_sesion(name: str = typer.Argument(..., help="Name of the session")):
@@ -14,14 +12,17 @@ def new_sesion(name: str = typer.Argument(..., help="Name of the session")):
 def new_grid(name: str = typer.Argument(..., help="Name of the grid")):
     typer.echo(f"Created new grid {name}")
 
+
 @app.command()
 def add_acquisition_area():
-    typer.echo(f"Added acquisition area")
+    typer.echo("Added acquisition area")
+
 
 @app.command()
 def image_lamella():
-    typer.echo(f"Image lamella")
+    typer.echo("Image lamella")
+
 
 @app.command()
 def acquire():
-    typer.echo(f"Acquire")
+    typer.echo("Acquire")

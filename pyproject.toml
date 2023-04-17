@@ -28,8 +28,8 @@ dependencies = [
 ]
 
 [project.scripts]
-lace_proc = "decolace.processing.cli:app"
-lace_acq = "decolace.acquisition.cli:app"
+lace_proc = "decolace.processing.cli_processing:app"
+lace_acq = "decolace.acquisition.cli_acquisition:app"
 
 [tool.hatch.version]
 path = "src/decolace/__init__.py"
