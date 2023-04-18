@@ -349,11 +349,11 @@ def assemble_matches(montage_info,refine_info):
     refine_info["cisTEMOriginalImageFilename"] = refine_info["cisTEMOriginalImageFilename"].str.replace("'", '')
     info = montage_info["tiles"].merge(refine_info, how="inner", left_on="tile_filename", right_on="cisTEMOriginalImageFilename")
     #print(info.loc[0])
-    info["tile_x"] = info["cisTEMXShift"]
-    info["tile_y"] = info["cisTEMYShift"]
-    info["cisTEMXShift"] = info["tile_x"] + info["tile_image_shift_pixel_x"] * info['cisTEMPixelSize']
+    info["tile_x"] = info["cisTEMOriginalXPosition"]
+    info["tile_y"] = info["cisTEMOriginalYPosition"]
+    info["cisTEMOriginalXPosition"] = info["tile_x"] + info["tile_image_shift_pixel_x"] * info['cisTEMPixelSize']
 
-    info["cisTEMYShift"] = info["tile_y"] + info["tile_image_shift_pixel_y"] * info['cisTEMPixelSize']
+    info["cisTEMOriginalYPosition"] = info["tile_y"] + info["tile_image_shift_pixel_y"] * info['cisTEMPixelSize']
 
     info["cisTEMOriginalImageFilename"] = montage_info["montage"]["montage_filename"].loc[0]
     info["cisTEMPixelSize"] = montage_info["montage"]["montage_pixel_size"].loc[0]
