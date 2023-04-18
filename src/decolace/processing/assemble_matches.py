@@ -1,13 +1,14 @@
-import typer
-from rich.console import Console
-from rich.progress import track
 from pathlib import Path
+
 import starfile
-import numpy as np
+import typer
 from decolace_processing import assemble_matches
+from rich.console import Console
+
 console = Console()
 
 app = typer.Typer(pretty_exceptions_show_locals=False)
+
 
 @app.command()
 def main(
@@ -17,9 +18,7 @@ def main(
     matches_star_path: Path = typer.Argument(
         ..., help="Path to the cisTEM TM package star file"
     ),
-    output_star_path: Path = typer.Argument(
-        ..., help="Path to the output star file"
-    )
+    output_star_path: Path = typer.Argument(..., help="Path to the output star file"),
 ):
     # Read decolace data
     montage_data = starfile.read(montage_star_path)
@@ -31,7 +30,6 @@ def main(
 
     starfile.write(result, output_star_path, overwrite=True)
 
+
 if __name__ == "__main__":
     typer.run(main)
-    
-    
