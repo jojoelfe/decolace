@@ -18,14 +18,16 @@ class session:
 
         self.state["grids"] = []
         self.state["microscope_settings"] = {}
+        self.state["active_grid"] = None
 
-    def write_to_disk(self):
+    def write_to_disk(self, save_grids=False):
         timestr = time.strftime("%Y%m%d-%H%M%S")
         filename = f"{self.name}_{timestr}.npy"
         filename = os.path.join(self.directory, filename)
         np.save(filename, self.state)
-        for grid_o in self.grids:
-            grid_o.write_to_disk()
+        if save_grids:
+            for grid_o in self.grids:
+                grid_o.write_to_disk()
 
     def load_from_disk(self):
         potential_files = glob.glob(os.path.join(self.directory, self.name + "_*.npy"))
@@ -40,25 +42,29 @@ class session:
 
     def add_grid(self, name):
         self.grids.append(grid(name, Path(self.directory, name).as_posix()))
+        self.grids[-1].write_to_disk()
         self.state["grids"].append([name, Path(self.directory, name).as_posix()])
+        self.state["active_grid"] = len(self.state["grids"]) - 1
 
-    def add_current_setting(self, name, fringe_free=False):
+    @property
+    def active_grid(self):
+        return self.grids[self.state["active_grid"]]
 
-        settings = {}
-        settings["magnification"] = serialem.ReportMag()
-        settings["magnification_index"] = serialem.ReportMagIndex()
-        settings["spot_size"] = serialem.ReportSpotSize()
-        settings["illuminated_area"] = serialem.ReportIlluminatedArea()
-        settings["beam_tilt"] = serialem.ReportBeamTilt()
-        settings["objective_stigmator"] = serialem.ReportObjectiveStigmator()
-        settings["fringe_free"] = fringe_free
+    def add_current_setting(self):
 
-        if fringe_free:
-            settings[
-                "fringe_free_nominal_defocus_c2aperture"
-            ] = serialem.ReportDefocus()
-            settings["fringe_free_stage_z_diff"] = (
-                serialem.ReportStageXYZ()[2] - self.eucentric_z
+        modes = ["V", "R"]
+        for mode in modes:
+            settings = {}
+            serialem.GoToLowDoseArea(mode)
+            settings["magnification"] = serialem.ReportMag()
+            settings["magnification_index"] = serialem.ReportMagIndex()
+            settings["spot_size"] = serialem.ReportSpotSize()
+            settings["illuminated_area"] = serialem.ReportIlluminatedArea()
+            settings["beam_tilt"] = serialem.ReportBeamTilt()
+            settings["objective_stigmator"] = serialem.ReportObjectiveStigmator()
+            settings["stage_to_specimen"] = np.array(serialem.StageToSpecimenMatrix(0))
+            settings["specimen_to_camera"] = np.array(
+                serialem.SpecimenToCameraMatrix(0)
             )
-
-        self.state["microscope_settings"][name] = settings
+            self.state["IS_to_camera"] = np.array(serialem.ISToCameraMatrix(0))
+            self.state["microscope_settings"][mode] = settings

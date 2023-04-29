@@ -1,16 +1,77 @@
+import glob
+import os
+from pathlib import Path
+
 import typer
+
+from .session import session
 
 app = typer.Typer()
 
 
-@app.command()
-def new_sesion(name: str = typer.Argument(..., help="Name of the session")):
-    typer.echo(f"Created new session {name}")
+def load_session(name, directory):
+    if directory is None:
+        directory = Path(os.getcwd()).as_posix()
+    else:
+        directory = Path(directory).as_posix()
+    if name is None:
+        potential_files = glob.glob(os.path.join(directory, "*.npy"))
+        if len(potential_files) < 1:
+            raise (FileNotFoundError("Couldn't find saved files"))
+        most_recent = sorted(potential_files)[-1]
+        name = os.path.basename(most_recent).split("_")[0]
+    session_o = session(name, directory)
+    session_o.load_from_disk()
+    return session_o
 
 
 @app.command()
-def new_grid(name: str = typer.Argument(..., help="Name of the grid")):
-    typer.echo(f"Created new grid {name}")
+def new_session(
+    name: str = typer.Argument(..., help="Name of the session"),
+    directory: str = typer.Option(..., help="Directory to save session in"),
+):
+    if directory is None:
+        directory = os.getcwd()
+    else:
+        directory = Path(directory).as_posix()
+    session_o = session(name, directory)
+    session_o.write_to_disk()
+    typer.echo(f"Created new session {name} in {directory}")
+
+
+@app.command()
+def save_microscope_settings(
+    name: str = typer.Option(..., help="Name of the session"),
+    directory: str = typer.Option(..., help="Directory to save session in"),
+):
+
+    session_o = load_session(name, directory)
+    session_o.add_current_setting()
+    session_o.write_to_disk()
+    typer.echo(f"Saved microscope settings for session {session_o.name}")
+
+
+@app.command()
+def new_grid(
+    name: str = typer.Argument(..., help="Name of the grid"),
+    session_name: str = typer.Option(..., help="Name of the session"),
+    directory: str = typer.Option(..., help="Directory to save session in"),
+):
+    session_o = load_session(session_name, directory)
+    session_o.add_grid(name)
+    session_o.write_to_disk()
+    typer.echo(f"Created new grid {name} for session {session_o.name}")
+
+
+@app.command()
+def euc_and_nice_view(
+    session_name: str = typer.Option(..., help="Name of the session"),
+    directory: str = typer.Option(..., help="Directory to save session in"),
+):
+    session_o = load_session(session_name, directory)
+    session_o.active_grid.eucentric()
+    session_o.active_grid.nice_view()
+    session_o.active_grid.write_to_disk()
 
 
 @app.command()
