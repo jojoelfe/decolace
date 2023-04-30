@@ -115,6 +115,7 @@ def image_lamella():
 def acquire(
     session_name: str = typer.Option(None, help="Name of the session"),
     directory: str = typer.Option(None, help="Directory to save session in"),
+    stepwise: bool = typer.Option(False, help="Acquire stepwise"),
 ):
     session_o = load_session(session_name, directory)
 
@@ -173,6 +174,20 @@ def acquire(
             if "beamshift_correction" in report:
                 log_string += f"BSC: {report['beamshift_correction']:.4f}um "
 
+            if "measured_defocus" in report:
+                log_string += f"MF: {report['measured_defocus']:.2f}um {report['ctf_cc']:.2f}CC {report['ctf_cc']:.2f}A"
+
+            if "defocus_adjusted_by" in report:
+                log_string += f"DA: {report['defocus_adjusted_by']:.2f}um"
+
             progress.log(log_string)
+            if stepwise:
+                cont = typer.confirm("Continue?")
+                if not cont:
+                    save = typer.confirm("Save?")
+                    if save:
+                        acquisition_area.write_to_disk()
+                    print("Aborting!")
+                    raise typer.Abort()
 
     session_o.active_grid.acquire(progress_callback=progress_callback)
