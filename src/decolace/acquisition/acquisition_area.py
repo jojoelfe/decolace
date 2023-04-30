@@ -5,6 +5,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from sklearn.linear_model import HuberRegressor
 
 try:
     import serialem
@@ -214,10 +215,22 @@ class AcquisitionAreaSingle:
         )
 
     def predict_focus(self, specimen_coordinates):
-        return None
+        data = np.array(self.state["defocus_calibration"]["measurements"])
+        if len(data) < 5:
+            return None
+        reg = HuberRegressor().fit(data[:, [0, 1]], data[:, 2])
+        return reg.predict(np.array(specimen_coordinates).reshape(1, -1))
 
     def predict_beamshift(self, specimen_coordinates, focus):
-        return None
+        data = np.array(self.state["beamshift_calibration"]["measurements"])
+        if len(data) < 5:
+            return None
+        reg_x = HuberRegressor().fit(data[:, [0, 1]], data[:, 3])
+        reg_y = HuberRegressor().fit(data[:, [0, 1]], data[:, 4])
+        return (
+            reg_x.predict(np.array(specimen_coordinates).reshape(1, -1)),
+            reg_y.predict(np.array(specimen_coordinates).reshape(1, -1)),
+        )
 
     def acquire(
         self,
@@ -269,7 +282,7 @@ class AcquisitionAreaSingle:
                 self.state["positions_still_to_fasttrack"] -= 1
                 report["fasttracked"] = True
                 if progress_callback is not None:
-                    progress_callback(report, self)
+                    progress_callback(report=report, acquisition_area=self)
                 continue
 
             counts = serialem.ReportMeanCounts()
@@ -283,6 +296,7 @@ class AcquisitionAreaSingle:
                 correction = np.linalg.norm(
                     beam_shift_before_centering - beam_shift_after_centering
                 )
+                report["beamshift_correction"] = correction
                 if correction < 0.06:
                     self.state["beamshift_calibration"]["measurements"].append(
                         [
@@ -296,13 +310,13 @@ class AcquisitionAreaSingle:
 
             if counts < self.state["count_threshold_for_ctf"]:
                 if progress_callback is not None:
-                    progress_callback(report, self)
+                    progress_callback(report=report, acquisition_area=self)
                 continue
 
             ctf_results = serialem.CtfFind("A", -0.1, -12)
             if len(ctf_results) < 6:
                 if progress_callback is not None:
-                    progress_callback(report, self)
+                    progress_callback(report=report, acquisition_area=self)
                 continue
             report["measured_defocus"] = ctf_results[0]
             report["ctf_cc"] = ctf_results[4]
@@ -312,7 +326,7 @@ class AcquisitionAreaSingle:
                 or ctf_results[5] > self.state["ctf_res_threshold"]
             ):
                 if progress_callback is not None:
-                    progress_callback(report, self)
+                    progress_callback(report=report, acquisition_area=self)
                 continue
 
             offset = self.state["desired_defocus"] - ctf_results[0]
@@ -336,7 +350,7 @@ class AcquisitionAreaSingle:
             report["adjusted_defocus"] = True
             report["defocus_adjusted_by"] = offset
             if progress_callback is not None:
-                progress_callback(report, self)
+                progress_callback(report=report, acquisition_area=self)
 
     def move_to_position(self):
         if self.state["navigator_center_index"] is not None:
@@ -347,3 +361,20 @@ class AcquisitionAreaSingle:
             serialem.RealignToOtherItem(
                 int(self.state["navigator_map_index"]), 0, 0, 0.05, 4, 1
             )
+
+    def move_to_position_if_needed(self):
+        if self.state["navigator_center_index"] is not None:
+            wanted_stage_position = serialem.ReportOtherItem(
+                int(self.state["navigator_center_index"])
+            )
+        else:
+            wanted_stage_position = serialem.ReportOtherItem(
+                int(self.state["navigator_map_index"])
+            )
+        stage_position = serialem.ReportStageXYZ()
+        wanted_stage_position = np.array(
+            [wanted_stage_position[1], wanted_stage_position[2]]
+        )
+        stage_position = np.array([stage_position[0], stage_position[1]])
+        if np.linalg.norm(wanted_stage_position - stage_position) > 1.0:
+            self.move_to_position()

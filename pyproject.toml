@@ -28,7 +28,8 @@ dependencies = [
   "sqlalchemy",
   "matplotlib",
   "shapely",
-  "rich"
+  "rich",
+  "scikit-learn"
 ]
 
 [project.scripts]

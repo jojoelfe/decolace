@@ -1,6 +1,7 @@
 import glob
 import os
 import time
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -125,24 +126,37 @@ class grid:
     def initialize_acquisition_areas(self, navigator_ids):
         pass
 
-    def start_acquisition(self, initial_defocus=24.0):
+    def start_acquisition(self, initial_defocus=24.0, progress_callback=None):
         for aa in self.acquisition_areas:
             if np.sum(aa.state["positions_acquired"]) == len(
                 aa.state["positions_acquired"]
             ):
                 continue
+            serialem.SetImageShift(0.0, 0.0)
+            if np.sum(aa.state["positions_acquired"]) == 0:
+                progress_callback(
+                    grid=self, acquisition_area=aa, report=None, type="start_new_area"
+                )
+                aa.move_to_position()
+            else:
+                progress_callback(
+                    grid=self, acquisition_area=aa, report=None, type="resume_area"
+                )
+                aa.move_to_position_if_needed()
             serialem.LongOperation("Da", "2")
             serialem.SetFolderForFrames(
                 os.path.join(os.path.abspath(aa.directory), "frames/")
             )
-            serialem.SetImageShift(0.0, 0.0)
 
-            aa.move_to_position()
             serialem.GoToLowDoseArea("R")
 
             serialem.ManageDewarsAndPumps(-1)
             while serialem.AreDewarsFilling():
                 time.sleep(60)
-            aa.acquire(initial_defocus=initial_defocus)
+
+            callback = None
+            if progress_callback is not None:
+                callback = partial(progress_callback, grid=self)
+            aa.acquire(initial_defocus=initial_defocus, progress_callback=callback)
             aa.write_to_disk()
         serialem.SetColumnOrGunValve(0)
