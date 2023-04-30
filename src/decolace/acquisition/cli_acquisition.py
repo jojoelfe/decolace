@@ -75,6 +75,17 @@ def euc_and_nice_view(
 
 
 @app.command()
+def new_map(
+    session_name: str = typer.Option(..., help="Name of the session"),
+    directory: str = typer.Option(..., help="Directory to save session in"),
+):
+    session_o = load_session(session_name, directory)
+    session_o.active_grid.take_map()
+    session_o.write_to_disk()
+    typer.echo(f"Created new map for grid {session_o.active_grid.name}")
+
+
+@app.command()
 def add_acquisition_area():
     typer.echo("Added acquisition area")
 

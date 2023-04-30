@@ -33,12 +33,13 @@ class grid:
             Path(self.directory, f"{self.name}_navigator.nav").as_posix()
         )
 
-    def write_to_disk(self):
+    def write_to_disk(self, save_areas=False):
         timestr = time.strftime("%Y%m%d-%H%M%S")
         filename = f"{self.name}_{timestr}.npy"
         filename = os.path.join(self.directory, filename)
-        for aa in self.acquisition_areas:
-            aa.write_to_disk()
+        if save_areas:
+            for aa in self.acquisition_areas:
+                aa.write_to_disk()
         np.save(filename, self.state)
 
     def load_from_disk(self):
@@ -118,6 +119,9 @@ class grid:
         serialem.Save()
         serialem.NewMap(0, "decolace_acquisition_map")
         self.save_navigator()
+
+    def initialize_acquisition_areas(self, navigator_ids):
+        pass
 
     def start_acquisition(self, initial_defocus=24.0):
         for aa in self.acquisition_areas:
