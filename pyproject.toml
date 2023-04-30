@@ -26,6 +26,9 @@ dependencies = [
   "pandas",
   "typer",
   "sqlalchemy",
+  "matplotlib",
+  "shapely",
+  "rich"
 ]
 
 [project.scripts]

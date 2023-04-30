@@ -28,7 +28,7 @@ def load_session(name, directory):
 @app.command()
 def new_session(
     name: str = typer.Argument(..., help="Name of the session"),
-    directory: str = typer.Option(..., help="Directory to save session in"),
+    directory: str = typer.Option(None, help="Directory to save session in"),
 ):
     if directory is None:
         directory = os.getcwd()
@@ -54,8 +54,8 @@ def save_microscope_settings(
 @app.command()
 def new_grid(
     name: str = typer.Argument(..., help="Name of the grid"),
-    session_name: str = typer.Option(..., help="Name of the session"),
-    directory: str = typer.Option(..., help="Directory to save session in"),
+    session_name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory the session is saved in"),
 ):
     session_o = load_session(session_name, directory)
     session_o.add_grid(name)
@@ -65,13 +65,27 @@ def new_grid(
 
 @app.command()
 def euc_and_nice_view(
-    session_name: str = typer.Option(..., help="Name of the session"),
-    directory: str = typer.Option(..., help="Directory to save session in"),
+    session_name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory to save session in"),
 ):
     session_o = load_session(session_name, directory)
     session_o.active_grid.eucentric()
     session_o.active_grid.nice_view()
     session_o.active_grid.write_to_disk()
+
+
+@app.command()
+def status(
+    session_name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory to save session in"),
+):
+    session_o = load_session(session_name, directory)
+    typer.echo(f"Session: {session_o.name} contains {len(session_o.grids)} grids")
+    typer.echo(f"Active grid: {session_o.active_grid.name}")
+    for grid in session_o.grids:
+        typer.echo(
+            f"Grid: {grid.name} contains {len(grid.acquisition_areas)} acquisition areas"
+        )
 
 
 @app.command()

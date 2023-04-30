@@ -5,8 +5,12 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import serialem
-from shapely import Point, Polygon, affinity
+
+try:
+    import serialem
+except ModuleNotFoundError:
+    print("Couldn't import serialem")
+from shapely import Polygon, affinity
 
 
 def _hexagonal_cover(polygon, radius):
@@ -105,11 +109,14 @@ class AcquisitionAreaSingle:
         self.state["defocus_calibration"]["model"] = None
         self.state["defocus_calibration"]["measurements"] = []
 
-        # List of tilts
         self.state["tilt"] = tilt
 
         self.state["navigator_map_index"] = None
         self.state["navigator_center_index"] = None
+
+        self.state["positions_still_to_fasttrack"] = 0
+        self.state["currently_fasttracking"] = 0
+        self.state["maximum_number_of_fasttracks"] = 10
 
     def write_to_disk(self):
         timestr = time.strftime("%Y%m%d-%H%M%S")
@@ -124,106 +131,6 @@ class AcquisitionAreaSingle:
         most_recent = sorted(potential_files)[-1]
         print(f"Loading file {most_recent}")
         self.state = np.load(most_recent, allow_pickle=True).item()
-
-    def initialize_from_navigator(self, item=None):
-        if item is None:
-            (index, x, y, z, t) = serialem.ReportNavItem()
-        else:
-            (index, x, y, z, t) = serialem.ReportOtherItem(item)
-        self.state["stage_position"] = np.array([x, y, z])
-        self.state["navigator_map_index"] = index
-        serialem.LoadOtherMap(int(index), "K")
-
-        corner_coordinates_stage = []
-        corner_coordinates_stage_diff = []
-        corner_coordinates_specimen = []
-        corner_coordinates_image = []
-        for i in range(4):
-            (ci, cx, cy, cz, ct) = serialem.ReportOtherItem(i + int(index) + 1)
-            corner_coordinates_stage.append((cx, cy))
-            dx = cx - x
-            dy = cy - y
-            corner_coordinates_stage_diff.append((dx, dy))
-            serialem.ImageShiftByStageDiff(dx, dy)
-            corner_coordinates_specimen.append(serialem.ReportSpecimenShift())
-            serialem.SetImageShift(0, 0)
-            corner_coordinates_image.append(
-                serialem.ReportItemImageCoords(i + int(index) + 1, "K")
-            )
-        self.state["corner_positions_specimen"] = np.array(corner_coordinates_specimen)
-        self.state["corner_positions_stage_diff"] = np.array(
-            corner_coordinates_stage_diff
-        )
-        self.state["corner_positions_stage_absolute"] = np.array(
-            corner_coordinates_stage
-        )
-        self.state["corner_positions_image"] = np.array(corner_coordinates_image)
-
-    def calculate_acquisition_positions(
-        self, direction=1, rotation_direction=1, expansion=1.1, add_overlap=0.05
-    ):
-
-        top_left = self.state["corner_positions_specimen"][0] * expansion
-        top_right = self.state["corner_positions_specimen"][1] * expansion
-        bottom_right = self.state["corner_positions_specimen"][2] * expansion
-        bottom_left = self.state["corner_positions_specimen"][3] * expansion
-
-        square = Polygon([top_left, top_right, bottom_right, bottom_left])
-        square = square.buffer(0.001)
-
-        def rotate(p, origin=(0, 0), degrees=0):
-            angle = np.deg2rad(degrees)
-            R = np.array(
-                [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
-            )
-            o = np.atleast_2d(origin)
-            p = np.atleast_2d(p)
-            return np.squeeze((R @ (p.T - o.T) + o.T).T)
-
-        acquisition_positions = [top_left]
-        last_position = top_left
-        cont = True
-        counter = 0
-        tcounter = 0
-
-        line_vector = (
-            (1 - add_overlap)
-            * 2
-            * ((top_right - top_left) / np.linalg.norm(top_right - top_left))
-            * self.state["beam_radius"]
-            * np.cos(30 * np.pi / 180)
-        )
-
-        while cont:
-            new_position = last_position + line_vector * direction
-            if square.contains(Point(new_position)):
-                acquisition_positions.append(new_position)
-                counter += 1
-            else:
-                if np.linalg.norm(new_position - acquisition_positions[-1]) < 5.0:
-                    tcounter += 1
-                else:
-                    # New row
-                    # p1 = rotate(line_vector,degrees = 60)
-                    p2 = rotate(
-                        line_vector, degrees=360 - rotation_direction * 60 * direction
-                    )
-                    # acquisition_positions.append(last_position + p1 * direction)
-                    new_position = last_position + p2 * direction
-                    if square.contains(Point(new_position)):
-                        acquisition_positions.append(new_position)
-                        counter += 1
-                    direction *= -1
-
-                    tcounter += 1
-                    if tcounter > 1800:
-                        cont = False
-            last_position = new_position
-        self.state["acquisition_positions"] = np.array(acquisition_positions)
-
-        self.state["positions_acquired"] = np.zeros(
-            self.state["acquisition_positions"].shape[0], dtype="bool"
-        )
 
     def plot_acquisition_positions(self):
         top_left = self.state["corner_positions_specimen"][0]
@@ -354,9 +261,17 @@ class AcquisitionAreaSingle:
                 )
 
             serialem.ManageDewarsAndPumps(1)
+            if self.state["positions_still_to_fasttrack"] > 0:
+                serialem.EarlyReturnNextShot(0)
             serialem.Record()
-
             self.state["positions_acquired"][index] = True
+            if self.state["positions_still_to_fasttrack"] > 0:
+                self.state["positions_still_to_fasttrack"] -= 1
+                report["fasttracked"] = True
+                if progress_callback is not None:
+                    progress_callback(report, self)
+                continue
+
             counts = serialem.ReportMeanCounts()
             report["counts"] = counts
 

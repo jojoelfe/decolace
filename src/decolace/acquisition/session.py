@@ -4,7 +4,11 @@ import time
 from pathlib import Path
 
 import numpy as np
-import serialem
+
+try:
+    import serialem
+except ModuleNotFoundError:
+    print("Couldn't import serialem")
 
 from .grid import grid
 

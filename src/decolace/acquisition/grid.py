@@ -4,9 +4,13 @@ import time
 from pathlib import Path
 
 import numpy as np
-import serialem
 
-from decolace.acquisitions.acquisition_area import acquisition_area
+try:
+    import serialem
+except ModuleNotFoundError:
+    print("Couldn't import serialem")
+
+from .acquisition_area import AcquisitionAreaSingle
 
 
 class grid:
@@ -52,9 +56,7 @@ class grid:
         print("Loading acquisition areas")
         self.acquisition_areas = []
         for area in self.state["acquisition_areas"]:
-            self.acquisition_areas.append(
-                acquisition_area.AcquisitionAreaSingle(area[0], area[1])
-            )
+            self.acquisition_areas.append(AcquisitionAreaSingle(area[0], area[1]))
             self.acquisition_areas[-1].load_from_disk()
 
     def ensure_view_file_is_open(self):
