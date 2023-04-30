@@ -1,11 +1,13 @@
 import glob
 import os
+from enum import Enum
 from pathlib import Path
 
 import typer
 from rich.panel import Panel
 from rich.progress import Progress
 
+from .acquisition_area import AcquisitionAreaSingle
 from .session import session
 
 app = typer.Typer()
@@ -25,6 +27,22 @@ def load_session(name, directory):
     session_o = session(name, directory)
     session_o.load_from_disk()
     return session_o
+
+
+def load_area(name, directory):
+    if directory is None:
+        directory = Path(os.getcwd()).as_posix()
+    else:
+        directory = Path(directory).as_posix()
+    if name is None:
+        potential_files = glob.glob(os.path.join(directory, "*.npy"))
+        if len(potential_files) < 1:
+            raise (FileNotFoundError("Couldn't find saved files"))
+        most_recent = sorted(potential_files)[-1]
+        name = os.path.basename(most_recent).split("_")[0]
+    area_o = AcquisitionAreaSingle(name, directory)
+    area_o.load_from_disk()
+    return area_o
 
 
 @app.command()
@@ -106,9 +124,37 @@ def add_acquisition_area():
     typer.echo("Added acquisition area")
 
 
+class DeCoData(str, Enum):
+    session = "session"
+    grid = "grid"
+    area = "area"
+
+
 @app.command()
-def image_lamella():
-    typer.echo("Image lamella")
+def show_exposures(
+    type: DeCoData = typer.Argument(DeCoData.session),
+    name: str = typer.Argument(None, help="Name of the session"),
+    directory: str = typer.Argument(None, help="Directory to save session in"),
+):
+    import napari
+
+    if type == DeCoData.area:
+        area_o = load_area(name, directory)
+        viewer = napari.view_points(
+            area_o.state["acquisition_positions"],
+            name="exposures",
+            size=area_o.state["beam_radius"] * 2,
+            face_color="#00000000",
+        )
+        viewer.add_shapes(
+            area_o.state["corner_positions_specimen"],
+            name="area",
+            face_color="#00000000",
+            edge_color="red",
+            edge_width=0.1,
+        )
+        napari.run()
+        typer.Exit()
 
 
 @app.command()
