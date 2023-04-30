@@ -141,13 +141,13 @@ def show_exposures(
     if type == DeCoData.area:
         area_o = load_area(name, directory)
         viewer = napari.view_points(
-            area_o.state["acquisition_positions"],
+            area_o.state["acquisition_positions"][:, ::-1],
             name="exposures",
             size=area_o.state["beam_radius"] * 2,
             face_color="#00000000",
         )
         viewer.add_shapes(
-            area_o.state["corner_positions_specimen"],
+            area_o.state["corner_positions_specimen"][:, ::-1],
             name="area",
             face_color="#00000000",
             edge_color="red",
