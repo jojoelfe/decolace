@@ -1,11 +1,10 @@
 import sqlite3
 from pathlib import Path
-from typing import Union
+from typing import Union, List
 
 import pandas as pd
-import sqlalchemy
 import numpy as np
-from sqlalchemy import create_engine
+from pydantic import BaseModel
 
 project_info_schema = [
     ("project_name", str, "project"),
@@ -14,6 +13,28 @@ project_info_schema = [
     ("unblur_arguments", object, {"align_cropped_area": True, "BB": False}),
     ("ctffind_arguments", object, {}),
 ]
+
+class AcquisitionArea(BaseModel):
+    name: str
+    decolace_acquisition_info_path: Path
+    frames_folder: Path
+    cistem_project: Path
+    initial_tile_star: Path
+    cistem_project_created: bool = False
+    unblur_run: bool = False
+    ctffind_run: bool = False
+    tile_star_created: bool = False
+    tile_positions_refined: bool = False
+    mts_run: dict = {}
+
+class ProcessingProject(BaseModel):
+    name: str
+    path: Path
+    processing_pixel_size: float = 2.0
+    unblur_arguments: dict = {"align_cropped_area": True, "BB": False}
+    ctffind_arguments: dict = {}
+    acquisition_areas = List[AcquisitionArea]
+    
 
 acquisition_area_schema = [
     ("name", str, "acquisition_area"),
@@ -30,6 +51,9 @@ acquisition_area_schema = [
     ("match_template_runs", object, {}),
 ]
 
+
+
+def new_project(name:str, directory: Path):
 
 def new_project(name: str, directory: Path):
     # Connect to database
