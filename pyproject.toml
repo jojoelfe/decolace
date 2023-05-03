@@ -30,7 +30,8 @@ dependencies = [
   "shapely",
   "rich",
   "scikit-learn",
-  "napari[all]"
+  "napari[all]",
+  "pydantic"
 ]
 
 [project.scripts]
