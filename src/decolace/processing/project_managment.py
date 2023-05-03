@@ -4,6 +4,7 @@ from typing import Union
 
 import pandas as pd
 import sqlalchemy
+import numpy as np
 from sqlalchemy import create_engine
 
 project_info_schema = [
@@ -16,22 +17,23 @@ project_info_schema = [
 
 acquisition_area_schema = [
     ("name", str, "acquisition_area"),
-    ("decolace_acquisition_info_path", str, "/tmp/acquisition_info"),
-    ("frames_folder", str, "/tmp/frames"),
-    ("cisTEM project", str, "/tmp/cistem.db"),
-    ("initial_tile_star", str, "/tmp/initial_tile.star"),
-    ("cistem_project_created", bool, False),
+    ("grid", str, "grid"),
+    ("session", str, "session"),
+    ("decolace_acquisition_info_path", str, ""),
+    ("frames_folder", str, ""),
+    ("cisTEM project", str, ""),
+    ("initial_tile_star", str, ""),
+    ("refined_tile_star", str, ""),
+
     ("unblur_run", bool, False),
     ("ctffind_run", bool, False),
-    ("tile_star_created", bool, False),
-    ("tile_positions_refined", bool, False),
-    ("mts_run", dict, {}),
+    ("match_template_runs", object, {}),
 ]
 
 
 def new_project(name: str, directory: Path):
     # Connect to database
-    engine = create_engine(f"sqlite:///{directory / f'{name}.decolace'}", echo=True)
+    engine = create_engine(f"sqlite:///{directory / f'{name}.decolace'}", echo=False)
     sqlite_connection = engine.connect()
     # Create row with overall project information
     project_info = {key: value for key, _, value in project_info_schema}
@@ -44,17 +46,16 @@ def new_project(name: str, directory: Path):
     )
 
     # Create empty dataframe with columns for acquisition_areas
-    aa_info = pd.DataFrame(
-        columns=[
-            "name",
-            "decolace_acquisition_info_path",
-            "frames_folder",
-            "cisTEM project",
-            "initial_tile_star",
-        ]
-    )
+    dtypes = np.dtype([(key, dtype) for key, dtype, _ in acquisition_area_schema])
+    aa_info = pd.DataFrame(np.empty(0, dtype=dtypes))
+    print(aa_info)
     aa_info.to_sql(
-        "acquisition_areas", sqlite_connection, if_exists="fail", index=False
+        "acquisition_areas", sqlite_connection, if_exists="fail", index=False,
+        dtype={
+            key: sqlalchemy.types.JSON
+            for key, t, default in acquisition_area_schema
+            if type(default) == dict
+        }
     )
     project_info.to_sql(
         "project_info",
@@ -92,9 +93,36 @@ def open_project(filename: Union[str, Path]):
         if not filename.exists():
             raise FileNotFoundError(f"Project {filename} can't be found.")
 
-    conn = sqlite3.connect(filename)
-    return conn
+    engine = create_engine(f"sqlite:///{filename}", echo=False)
+    sqlite_connection = engine.connect()
+    return sqlite_connection
 
+def read_project(sqlite_connection):
+    # Read in project_info table
+    project_info = pd.read_sql("project_info", sqlite_connection)
+    # Read in acquisition_areas table
+    aa_info = pd.read_sql("acquisition_areas", sqlite_connection)
+    return project_info, aa_info
 
-def update_project(conn: sqlite3.Connection):
+def update_project(sqlite_connection):
+    # Check if the columns in the database are up to date
+    # If not, add them
+    # Start with project_info_schema
+    # Read in project_info table
+
+    project_info = pd.read_sql("project_info", sqlite_connection)
+    for key, dtype, default in project_info_schema:
+        if key not in project_info.columns:
+            project_info[key] = default
+    project_info.to_sql("project_info", sqlite_connection, if_exists="replace")
+
+    # Then do the same for acquisition_areas
+    aa_info = pd.read_sql("acquisition_areas", sqlite_connection)
+    for key, dtype, default in acquisition_area_schema:
+        if key not in aa_info.columns:
+            aa_info[key] = default
+    aa_info.to_sql("acquisition_areas", sqlite_connection, if_exists="replace")
+
+    return()
+
     pass
