@@ -155,6 +155,43 @@ def show_exposures(
 ):
     import napari
 
+    if type == DeCoData.grid:
+        session_o = load_session(name, directory)
+        grid_o = session_o.active_grid
+        write_to_disktext = {
+                'string': '{order}',
+                'size': 10,
+                'color': 'white',
+                'translation': np.array([0, 0]),
+             }
+        order = []
+        positions = []
+        corner_positions = []
+        for i, aa in enumerate(grid_o.acquisition_areas):
+            #order.append(np.array(range(len(aa.state["acquisition_positions"]))))
+            
+            pos = aa.state["acquisition_positions"][:, ::-1]
+            # Concatenat i to pos along axis 1
+            pos = np.concatenate((np.ones((len(pos), 1)) * i, pos), axis=1)
+            positions.append(pos)
+        
+        pos = np.concatenate(positions, axis = 0)
+        print(pos.shape)
+        
+        viewer = napari.view_points(
+            pos,
+            name="exposures",
+            size=aa.state["beam_radius"] * 2,
+            face_color="#00000000",
+            #features={"order":np.array(order)},
+            text=write_to_disktext
+        )
+        #viewer.add_shapes(
+        #    np.array(corner_positions),
+        #    name="area",
+        #    face_color="#00000000",
+        #)
+
     if type == DeCoData.area:
         area_o = load_area(name, directory)
         order = np.array(range(len(area_o.state["acquisition_positions"])))
@@ -179,8 +216,8 @@ def show_exposures(
             edge_color="red",
             edge_width=0.1,
         )
-        napari.run()
-        typer.Exit()
+    napari.run()
+    typer.Exit()
 
 @app.command()
 def set_active_grid(
