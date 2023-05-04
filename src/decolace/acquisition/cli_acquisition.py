@@ -6,7 +6,7 @@ from pathlib import Path
 import typer
 from rich.panel import Panel
 from rich.progress import Progress
-
+import numpy as np
 from .acquisition_area import AcquisitionAreaSingle
 from .session import session
 
@@ -140,11 +140,20 @@ def show_exposures(
 
     if type == DeCoData.area:
         area_o = load_area(name, directory)
+        order = np.array(range(len(area_o.state["acquisition_positions"])))
+        write_to_disktext = {
+            'string': '{order}',
+            'size': 10,
+            'color': 'white',
+            'translation': np.array([0, 0]),
+         }
         viewer = napari.view_points(
             area_o.state["acquisition_positions"][:, ::-1],
             name="exposures",
             size=area_o.state["beam_radius"] * 2,
             face_color="#00000000",
+            features={"order":order},
+            text=write_to_disktext
         )
         viewer.add_shapes(
             area_o.state["corner_positions_specimen"][:, ::-1],
