@@ -57,7 +57,7 @@ class grid:
         print("Loading acquisition areas")
         self.acquisition_areas = []
         for area in self.state["acquisition_areas"]:
-            self.acquisition_areas.append(AcquisitionAreaSingle(area[0], area[1]))
+            self.acquisition_areas.append(AcquisitionAreaSingle(area[0], Path(self.directory) / area[0]))
             self.acquisition_areas[-1].load_from_disk()
 
     def ensure_view_file_is_open(self):

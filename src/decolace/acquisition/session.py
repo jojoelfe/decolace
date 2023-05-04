@@ -54,6 +54,13 @@ class session:
     def active_grid(self):
         return self.grids[self.state["active_grid"]]
 
+    def set_active_grid(self, grid_name):
+        for i, grid in enumerate(self.grids):
+            if grid.name == grid_name:
+                self.state["active_grid"] = i
+                return
+        raise (ValueError("Couldn't find grid with that name"))
+
     def add_current_setting(self):
 
         modes = ["V", "R"]

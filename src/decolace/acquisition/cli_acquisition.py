@@ -7,8 +7,14 @@ import typer
 from rich.panel import Panel
 from rich.progress import Progress
 import numpy as np
+import shapely
 from .acquisition_area import AcquisitionAreaSingle
 from .session import session
+
+try:
+    import serialem
+except ModuleNotFoundError:
+    print("Couldn't import serialem")
 
 app = typer.Typer()
 
@@ -164,6 +170,70 @@ def show_exposures(
         )
         napari.run()
         typer.Exit()
+
+@app.command()
+def set_active_grid(
+    name: str = typer.Argument(..., help="Name of the grid"),
+    session_name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory the session is saved in"),
+):
+    session_o = load_session(session_name, directory)
+    session_o.set_active_grid(name)
+    session_o.write_to_disk()
+    typer.echo(f"Set active grid to {name} for session {session_o.name}")
+
+
+@app.command()
+def setup_areas(
+    session_name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory to save session in"),
+):
+    session_o = load_session(session_name, directory)
+    
+    num_items = serialem.ReportNumTableItems()
+    maps = []
+    map_coordinates = []
+    map_navids = []
+    for i in range(1,int(num_items)+1):
+        nav_item_info = serialem.ReportOtherItem(i)
+        nav_id = int(nav_item_info[0])
+        nav_note = serialem.GetVariable("navNote")
+        
+        if nav_note == "decolace_acquisition_map":
+            serialem.LoadOtherMap(i,"A")
+            image = np.asarray(serialem.bufferImage("A")).copy()
+            maps.append(image)
+            map_navids.append(nav_id)
+            map_coordinates.append(nav_item_info[1:3])
+    import napari
+    from napari.layers import Shapes
+    from magicgui import magicgui
+    viewer = napari.view_image(np.array(maps))
+    
+    @magicgui(shapes={'label': 'Setup areas'})
+    def my_widget(shapes: Shapes):
+        points = []
+        areas = shapes.data
+        for area in areas:
+            map_id = area[0,0]
+            if np.sum(area[:,0] - map_id) != 0:
+                raise("Error: Map ID is not the same for all points in the polygon")
+            name = f"area{map_id}"
+            polygon = shapely.geometry.Polygon(area[:,1:3])
+            aa = AcquisitionAreaSingle(name,Path(session_o.active_grid.directory,name).as_posix(),beam_radius=0.2,tilt=session_o.active_grid.state["tilt"])   
+            aa.initialize_from_napari(map_navids[int(map_id)], [polygon.centroid.y, polygon.centroid.x], area[:,1:3])
+            aa.calculate_acquisition_positions_from_napari()
+            aa.write_to_disk()
+            session_o.active_grid.state["acquisition_areas"].append([aa.name,aa.directory])
+        session_o.set_active_grid.write_to_disk()
+             
+        
+        
+    viewer.window.add_dock_widget(my_widget)
+    napari.run()
+    print("Done")
+    typer.Exit()
+
 
 
 @app.command()
