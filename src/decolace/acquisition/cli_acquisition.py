@@ -225,7 +225,8 @@ def setup_areas(
             aa.calculate_acquisition_positions_from_napari()
             aa.write_to_disk()
             session_o.active_grid.state["acquisition_areas"].append([aa.name,aa.directory])
-        session_o.set_active_grid.write_to_disk()
+        session_o.active_grid.write_to_disk()
+        session_o.active_grid.save_navigator()
              
         
         
