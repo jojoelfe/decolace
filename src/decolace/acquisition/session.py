@@ -44,8 +44,9 @@ class session:
             self.grids.append(grid(grid_info[0], grid_info[1]))
             self.grids[-1].load_from_disk()
 
-    def add_grid(self, name):
+    def add_grid(self, name, tilt):
         self.grids.append(grid(name, Path(self.directory, name).as_posix()))
+        self.grids[-1].state["tilt"] = tilt
         self.grids[-1].write_to_disk()
         self.state["grids"].append([name, Path(self.directory, name).as_posix()])
         self.state["active_grid"] = len(self.state["grids"]) - 1

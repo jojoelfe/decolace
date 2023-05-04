@@ -76,15 +76,26 @@ def save_microscope_settings(
     session_o.write_to_disk()
     typer.echo(f"Saved microscope settings for session {session_o.name}")
 
+@app.command()
+def set_beam_radius(
+    beam_radius: float = typer.Argument(..., help="Beam radius in um"),
+    name: str = typer.Option(..., help="Name of the session"),
+    directory: str = typer.Option(..., help="Directory to save session in"),
+):
+    session_o = load_session(name, directory)
+    session_o.state["beam_radius"] = beam_radius
+    session_o.write_to_disk()
+    typer.echo(f"Set beam radius to {beam_radius} for session {session_o.name}")
 
 @app.command()
 def new_grid(
     name: str = typer.Argument(..., help="Name of the grid"),
+    tilt: float = typer.Argument(..., help="Tilt to apply to the the grid"),
     session_name: str = typer.Option(None, help="Name of the session"),
     directory: str = typer.Option(None, help="Directory the session is saved in"),
 ):
     session_o = load_session(session_name, directory)
-    session_o.add_grid(name)
+    session_o.add_grid(name, tilt=tilt)
     session_o.write_to_disk()
     typer.echo(f"Created new grid {name} for session {session_o.name}")
 
@@ -220,7 +231,7 @@ def setup_areas(
                 raise("Error: Map ID is not the same for all points in the polygon")
             name = f"area{map_id}"
             polygon = shapely.geometry.Polygon(area[:,1:3])
-            aa = AcquisitionAreaSingle(name,Path(session_o.active_grid.directory,name).as_posix(),beam_radius=0.2,tilt=session_o.active_grid.state["tilt"])   
+            aa = AcquisitionAreaSingle(name,Path(session_o.active_grid.directory,name).as_posix(),beam_radius=session_o.state["beam_radius"],tilt=session_o.active_grid.state["tilt"])   
             aa.initialize_from_napari(map_navids[int(map_id)], [polygon.centroid.y, polygon.centroid.x], area[:,1:3])
             aa.calculate_acquisition_positions_from_napari()
             aa.write_to_disk()
