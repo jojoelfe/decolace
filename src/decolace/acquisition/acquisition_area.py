@@ -6,7 +6,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.linear_model import HuberRegressor
-
+from timeit import default_timer as timer
 try:
     import serialem
 except ModuleNotFoundError:
@@ -53,7 +53,9 @@ def _hexagonal_cover(polygon, radius):
     # Loop over each hexagon in the grid and test if it intersects the input polygon
     for j in range(-ny, ny):
         y = miny + offsety + (j * radius * 3 / 2)
-        for i in range(-nx, nx):
+        direction = int(((j % 2) - 0.5) * 2)
+        print(direction)
+        for i in range(-nx*direction, nx*direction, direction):
             x = (
                 minx
                 + offsetx
@@ -67,7 +69,7 @@ def _hexagonal_cover(polygon, radius):
 
 
 class AcquisitionAreaSingle:
-    def __init__(self, name, directory, beam_radius=100, defocus=-0.8, tilt=0.0):
+    def __init__(self, name, directory, beam_radius=100, defocus=-1.0, tilt=0.0):
         self.state = {}
         self.name = name
         self.directory = directory
@@ -109,7 +111,7 @@ class AcquisitionAreaSingle:
         self.state["defocus_calibration"] = {}
         self.state["defocus_calibration"]["model"] = None
         self.state["defocus_calibration"]["measurements"] = []
-
+        self.state['use_focus_prediction'] = False
         self.state["tilt"] = tilt
 
         self.state["navigator_map_index"] = None
@@ -221,9 +223,9 @@ class AcquisitionAreaSingle:
         reg = HuberRegressor().fit(data[:, [0, 1]], data[:, 2])
         return reg.predict(np.array(specimen_coordinates).reshape(1, -1))
 
-    def predict_beamshift(self, specimen_coordinates, focus):
-        data = np.array(self.state["beamshift_calibration"]["measurements"])
-        if len(data) < 5:
+    def predict_beamshift(self, specimen_coordinates):
+        data = np.array(self.state["beamshift_calibration"]["measurements"][-100:])
+        if len(data) < 25:
             return None
         reg_x = HuberRegressor().fit(data[:, [0, 1]], data[:, 3])
         reg_y = HuberRegressor().fit(data[:, [0, 1]], data[:, 4])
@@ -239,8 +241,9 @@ class AcquisitionAreaSingle:
         initial_beamshift=None,
         progress_callback=None,
     ):
-
+        serialem.ChangeFocus(-1.0)
         for index in range(len(self.state["acquisition_positions"])):
+            start = timer()
             report = {}
             if self.state["positions_acquired"][index]:
                 continue
@@ -249,6 +252,7 @@ class AcquisitionAreaSingle:
                     serialem.SetBeamShift(initial_beamshift[0], initial_beamshift[1])
                 if initial_defocus is not None:
                     serialem.SetDefocus(initial_defocus)
+                
             if index % 10 == 0:
                 self.write_to_disk()
             report["position"] = index
@@ -258,10 +262,10 @@ class AcquisitionAreaSingle:
                 - current_speciment_shift
             )
             serialem.ImageShiftByMicrons(diff[0], diff[1])
-            focus_prediction = self.predict_focus(
-                self.state["acquisition_positions"][index]
-            )
-            if focus_prediction is not None:
+            focus_prediction = None #self.predict_focus(
+                #self.state["acquisition_positions"][index]
+            #)
+            if focus_prediction is not None and self.state['use_focus_prediction']:
                 report["using_focus_prediction"] = True
                 serialem.SetDefocus(focus_prediction)
             beam_shift_prediction = self.predict_beamshift(
@@ -272,15 +276,32 @@ class AcquisitionAreaSingle:
                 serialem.SetBeamShift(
                     beam_shift_prediction[0], beam_shift_prediction[1]
                 )
+            predictions = timer()
+            if established_lock and index % 5 != 0 and index > 50:
+                self.state["positions_still_to_fasttrack"] = 1
+                serialem.EarlyReturnNextShot(0)         
+            else:
+                self.state["positions_still_to_fasttrack"] = 0
+                serialem.ManageDewarsAndPumps(1)
 
-            serialem.ManageDewarsAndPumps(1)
-            if self.state["positions_still_to_fasttrack"] > 0:
-                serialem.EarlyReturnNextShot(0)
+            
+            #if self.state["positions_still_to_fasttrack"] > 0:
+                #serialem.EarlyReturnNextShot(0)
             serialem.Record()
             self.state["positions_acquired"][index] = True
+            #if self.state["positions_still_to_fasttrack"] > 0:
+            #    self.state["positions_still_to_fasttrack"] -= 1
+            #    report["fasttracked"] = True
+            #    report["counts"] = 0
+            #    if progress_callback is not None:
+            #        progress_callback(report=report, acquisition_area=self)
+            #    continue
+            record = timer()
+            print(f"{predictions-start} {record-predictions}")
             if self.state["positions_still_to_fasttrack"] > 0:
-                self.state["positions_still_to_fasttrack"] -= 1
                 report["fasttracked"] = True
+                report["counts"] = 0
+                #serialem.ChangeFocus(-0.01)
                 if progress_callback is not None:
                     progress_callback(report=report, acquisition_area=self)
                 continue
@@ -312,8 +333,14 @@ class AcquisitionAreaSingle:
                 if progress_callback is not None:
                     progress_callback(report=report, acquisition_area=self)
                 continue
-
+            serialem.FFT("A")
+            #serialem.Save()
             ctf_results = serialem.CtfFind("A", -0.1, -12)
+            #ctf_results = []
+            #serialem.CropCenterToSize("A",700,700)
+            
+            #plot_results = serialem.Ctfplotter("A", -0.1,-7,1,0,15.0,1)
+            #print(plot_results)
             if len(ctf_results) < 6:
                 if progress_callback is not None:
                     progress_callback(report=report, acquisition_area=self)
@@ -327,6 +354,7 @@ class AcquisitionAreaSingle:
             ):
                 if progress_callback is not None:
                     progress_callback(report=report, acquisition_area=self)
+                serialem.ChangeFocus(-0.05)
                 continue
 
             offset = self.state["desired_defocus"] - ctf_results[0]
@@ -338,19 +366,32 @@ class AcquisitionAreaSingle:
                         serialem.ReportDefocus() + offset,
                     ]
                 )
+                self.state['use_focus_prediction'] = False
+            else :
+                self.state['use_focus_prediction'] = False
             if abs(offset) > self.state["max_ctf_step"] and established_lock:
                 offset = self.state["max_ctf_step"] * np.sign(offset)
             else:
                 if abs(offset) > 2.0:
                     offset = 2.0 * np.sign(offset)
-            if abs(offset) < 0.1 and not established_lock:
+            if abs(offset) < 0.1 and not established_lock and correction < 0.06:
                 established_lock = True
             if abs(offset) > 0.001:
                 serialem.ChangeFocus(offset)
             report["adjusted_defocus"] = True
             report["defocus_adjusted_by"] = offset
+
+            #if self.state['use_focus_prediction'] == True and correction < 0.01 and len(self.state["defocus_calibration"]["measurements"]) > 20:
+            #    if self.state["currently_fasttracking"] < self.state["maximum_number_of_fasttracks"]:
+            #        self.state["currently_fasttracking"] += 1
+            #    self.state["positions_still_to_fasttrack"] = self.state["currently_fasttracking"]
+            #else :
+            #    self.state["currently_fasttracking"] = 0
+        
             if progress_callback is not None:
                 progress_callback(report=report, acquisition_area=self)
+            others = timer()
+            print(f"{predictions-start} {record-predictions} {others-record}")
 
     def move_to_position(self):
         if self.state["navigator_center_index"] is not None:
@@ -376,5 +417,5 @@ class AcquisitionAreaSingle:
             [wanted_stage_position[1], wanted_stage_position[2]]
         )
         stage_position = np.array([stage_position[0], stage_position[1]])
-        if np.linalg.norm(wanted_stage_position - stage_position) > 1.0:
+        if np.linalg.norm(wanted_stage_position - stage_position) > 0.001:
             self.move_to_position()

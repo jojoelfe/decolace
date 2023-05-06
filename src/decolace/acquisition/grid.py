@@ -15,7 +15,7 @@ from .acquisition_area import AcquisitionAreaSingle
 
 
 class grid:
-    def __init__(self, name, directory, beam_radius=100, defocus=-0.8, tilt=0.0):
+    def __init__(self, name, directory, beam_radius=100, defocus=-1.0, tilt=0.0):
         self.state = {}
         self.name = name
         self.directory = directory
@@ -102,15 +102,15 @@ class grid:
 
     def nice_view(self):
         serialem.GoToLowDoseArea("V")
-        serialem.ChangeFocus(-200)
-        serialem.SetExposure("V", 4)
+        serialem.ChangeFocus(-250)
+        serialem.SetExposure("V", 10)
         serialem.SetDoseFracParams("V", 1, 1, 0)
         serialem.SetFrameTime("V", 1)
         serialem.SetFolderForFrames(
             os.path.abspath(self.state["view_frames_directory"])
         )
         serialem.View()
-        serialem.ChangeFocus(200)
+        serialem.ChangeFocus(250)
         serialem.SetExposure("V", 1)
         serialem.SetDoseFracParams("V", 0)
         self.ensure_view_file_is_open()
@@ -122,12 +122,14 @@ class grid:
         serialem.Save()
         serialem.NewMap(0, "decolace_acquisition_map")
         self.save_navigator()
+        serialem.TiltTo(0.0)
 
     def initialize_acquisition_areas(self, navigator_ids):
         pass
 
-    def start_acquisition(self, initial_defocus=24.0, progress_callback=None):
-        for aa in self.acquisition_areas:
+    def start_acquisition(self, initial_defocus=22.0, progress_callback=None):
+        
+        for index, aa in enumerate(self.acquisition_areas):
             if np.sum(aa.state["positions_acquired"]) == len(
                 aa.state["positions_acquired"]
             ):
@@ -149,6 +151,10 @@ class grid:
             )
 
             serialem.GoToLowDoseArea("R")
+            initial_beamshift = None
+            if index > 0:
+                initial_beamshift = self.acquisition_areas[index-1].predict_beamshift(aa.state['acquisition_positions'][0])
+
 
             serialem.ManageDewarsAndPumps(-1)
             while serialem.AreDewarsFilling():
@@ -157,6 +163,6 @@ class grid:
             callback = None
             if progress_callback is not None:
                 callback = partial(progress_callback, grid=self)
-            aa.acquire(initial_defocus=initial_defocus, progress_callback=callback)
+            aa.acquire(initial_defocus=initial_defocus, progress_callback=callback,initial_beamshift=initial_beamshift)
             aa.write_to_disk()
         serialem.SetColumnOrGunValve(0)

@@ -78,5 +78,5 @@ class session:
             settings["specimen_to_camera"] = np.array(
                 serialem.SpecimenToCameraMatrix(0)
             )
-            self.state["IS_to_camera"] = np.array(serialem.ISToCameraMatrix(0))
+            settings["IS_to_camera"] = np.array(serialem.ISToCameraMatrix(0))
             self.state["microscope_settings"][mode] = settings

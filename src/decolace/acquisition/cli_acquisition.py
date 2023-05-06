@@ -10,6 +10,17 @@ import numpy as np
 import shapely
 from .acquisition_area import AcquisitionAreaSingle
 from .session import session
+import signal
+
+class GracefulKiller:
+  kill_now = False
+  def __init__(self):
+    signal.signal(signal.SIGINT, self.exit_gracefully)
+    signal.signal(signal.SIGTERM, self.exit_gracefully)
+
+  def exit_gracefully(self, *args):
+    print("Recieved SIGTERM")
+    self.kill_now = True
 
 try:
     import serialem
@@ -168,7 +179,7 @@ def show_exposures(
         positions = []
         corner_positions = []
         for i, aa in enumerate(grid_o.acquisition_areas):
-            #order.append(np.array(range(len(aa.state["acquisition_positions"]))))
+            order.append(np.array(range(len(aa.state["acquisition_positions"]))))
             
             pos = aa.state["acquisition_positions"][:, ::-1]
             # Concatenat i to pos along axis 1
@@ -176,14 +187,16 @@ def show_exposures(
             positions.append(pos)
         
         pos = np.concatenate(positions, axis = 0)
+        order = np.concatenate(order, axis = 0)
         print(pos.shape)
+        print(order.shape)
         
         viewer = napari.view_points(
             pos,
             name="exposures",
             size=aa.state["beam_radius"] * 2,
             face_color="#00000000",
-            #features={"order":np.array(order)},
+            features={"order":np.array(order)},
             text=write_to_disktext
         )
         #viewer.add_shapes(
@@ -266,7 +279,7 @@ def setup_areas(
             map_id = area[0,0]
             if np.sum(area[:,0] - map_id) != 0:
                 raise("Error: Map ID is not the same for all points in the polygon")
-            name = f"area{map_id}"
+            name = f"area{len(session_o.active_grid.state['acquisition_areas'])+2}"
             polygon = shapely.geometry.Polygon(area[:,1:3])
             aa = AcquisitionAreaSingle(name,Path(session_o.active_grid.directory,name).as_posix(),beam_radius=session_o.state["beam_radius"],tilt=session_o.active_grid.state["tilt"])   
             aa.initialize_from_napari(map_navids[int(map_id)], [polygon.centroid.y, polygon.centroid.x], area[:,1:3])
@@ -291,8 +304,9 @@ def acquire(
     directory: str = typer.Option(None, help="Directory to save session in"),
     stepwise: bool = typer.Option(False, help="Acquire stepwise"),
 ):
+    killer = GracefulKiller()
     session_o = load_session(session_name, directory)
-
+    session_o.active_grid.state["stepwise"] = stepwise
     total_shots = sum(
         [
             len(aa.state["acquisition_positions"])
@@ -331,37 +345,43 @@ def acquire(
             progress.update(grid_task, advance=1)
             log_string = f"{report['position']}/{len(acquisition_area.state['acquisition_positions'])} "
             if "using_focus_prediction" in report:
-                log_string += "FP :check_mark: "
+                log_string += "FP :green_heart: "
             else:
                 log_string += "FP :x: "
             if "using_beamshift_prediction" in report:
-                log_string += "BSP :check_mark: "
+                log_string += "BSP :green_heart: "
             else:
                 log_string += "BSP :x: "
             if "fasttracked" in report:
-                log_string += "FT :check_mark: "
+                log_string += "FT :green_heart: "
             else:
                 log_string += "FT :x: "
 
-            log_string += f"Counts {report['counts']} "
+            log_string += f"Counts {report['counts']:.1f} "
 
             if "beamshift_correction" in report:
                 log_string += f"BSC: {report['beamshift_correction']:.4f}um "
 
             if "measured_defocus" in report:
-                log_string += f"MF: {report['measured_defocus']:.2f}um {report['ctf_cc']:.2f}CC {report['ctf_cc']:.2f}A"
+                log_string += f"MF: {report['measured_defocus']:.2f}um {report['ctf_cc']:.3f}CC {report['ctf_res']:.2f}A "
 
             if "defocus_adjusted_by" in report:
-                log_string += f"DA: {report['defocus_adjusted_by']:.2f}um"
+                log_string += f"DA: {report['defocus_adjusted_by']:.3f}um"
 
             progress.log(log_string)
-            if stepwise:
+            if killer.kill_now:
+                grid.state["stepwise"] = True
+            if grid.state["stepwise"]:
                 cont = typer.confirm("Continue?")
                 if not cont:
                     save = typer.confirm("Save?")
                     if save:
                         acquisition_area.write_to_disk()
-                    print("Aborting!")
-                    raise typer.Abort()
+                    continous = typer.confirm("Continous:")
+                    if continous:
+                        grid.state["stepwise"] = False
+                    else:
+                        print("Aborting!")
+                        raise typer.Abort()
 
-    session_o.active_grid.acquire(progress_callback=progress_callback)
+    session_o.active_grid.start_acquisition(progress_callback=progress_callback)
