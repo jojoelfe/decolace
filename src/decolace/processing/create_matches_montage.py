@@ -23,13 +23,14 @@ def main(
         ..., help="Path to the output image file"
     ),
     tm_job_id: int = typer.Option(1, help="TM job ID"),
+    image: str = typer.Option("PROJECTION_RESULT_OUTPUT_FILE", help="Which TM image to assemble")
 ):
     # Read decolace data
     montage_data = starfile.read(montage_star_path)
     # Match data
     match_data = read_matches_data(cistem_project_path, tm_job_id)
     # Create montage metadata
-    matches_montage_metadata = adjust_metadata_for_matches(montage_data, match_data)
+    matches_montage_metadata = adjust_metadata_for_matches(montage_data, match_data, image=image)
     # console.log(f"Wrote montage metadata to {output_path_metadata}.")
     create_montage(matches_montage_metadata, output_path_montage)
     console.log(
