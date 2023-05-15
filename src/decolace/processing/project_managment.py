@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Union
 
 import pandas as pd
 import starfile
@@ -8,25 +8,23 @@ from pydantic import BaseModel, validator
 
 class AcquisitionAreaPreProcessing(BaseModel):
     area_name: str
-    decolace_acquisition_info_path: Optional[Path] = None
-    frames_folder: Optional[Path] = None
-    view_frames_path: Optional[Path] = None
-    view_image_path: Optional[Path] = None
-    cistem_project: Optional[Path] = None
+    decolace_acquisition_info_path: Union[Path, str] = None
+    frames_folder: Union[Path, str] = None
+    view_frames_path: Union[Path, str] = None
+    view_image_path: Union[Path, str] = None
+    cistem_project: Union[Path, str] = None
     unblur_run: bool = False
     ctffind_run: bool = False
-    initial_tile_star: Optional[Path] = None
-    refined_tile_star: Optional[Path] = None
-    montage_star: Optional[Path] = None
-    montage_image: Optional[Path] = None
+    initial_tile_star: Union[Path, str] = None
+    refined_tile_star: Union[Path, str] = None
+    montage_star: Union[Path, str] = None
+    montage_image: Union[Path, str] = None
 
-    @validator('*')
-    def change_nan_to_none(cls, v, field):
-        print(field.outer_type_)
-        if field.outer_type_ is Optional[Path] and isnan(v):
+    @validator("*")
+    def enforce_none(cls, v):
+        if v == "None" or v == "nan":
             return None
         return v
-
 
 
 class ProcessingProject(BaseModel):
@@ -46,14 +44,13 @@ class ProcessingProject(BaseModel):
             star_data["acquisition_areas"] = pd.DataFrame(
                 [aa for aa in acquisition_areas]
             )
-        starfile.write(star_data, filename)
+        starfile.write(star_data, filename, na_rep="None", overwrite=True)
 
     @classmethod
     def read(cls, filename: Path):
         star_data = starfile.read(filename)
-        project_info = star_data["project_info"]
+        project_info = star_data["project_info"].to_dict("records")[0]
         acquisition_areas = star_data["acquisition_areas"]
-        print(acquisition_areas.to_dict("records"))
         acquisition_areas = [
             AcquisitionAreaPreProcessing(**aa)
             for aa in acquisition_areas.to_dict("records")
