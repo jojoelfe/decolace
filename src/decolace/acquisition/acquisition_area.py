@@ -132,7 +132,6 @@ class AcquisitionAreaSingle:
         if len(potential_files) < 1:
             raise (FileNotFoundError("Couldn't find saved files"))
         most_recent = sorted(potential_files)[-1]
-        print(f"Loading file {most_recent}")
         self.state = np.load(most_recent, allow_pickle=True).item()
 
     def plot_acquisition_positions(self):

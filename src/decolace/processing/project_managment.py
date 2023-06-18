@@ -8,7 +8,9 @@ from pydantic import BaseModel, validator
 
 class AcquisitionAreaPreProcessing(BaseModel):
     area_name: str
-    decolace_acquisition_info_path: Union[Path, str] = None
+    decolace_acquisition_area_info_path: Union[Path, str] = None
+    decolace_grid_info_path: Union[Path, str] = None
+    decolace_session_info_path: Union[Path, str] = None
     frames_folder: Union[Path, str] = None
     view_frames_path: Union[Path, str] = None
     view_image_path: Union[Path, str] = None
@@ -44,15 +46,18 @@ class ProcessingProject(BaseModel):
             star_data["acquisition_areas"] = pd.DataFrame(
                 [aa for aa in acquisition_areas]
             )
-        starfile.write(star_data, filename, na_rep="None", overwrite=True)
+        Path(filename).rename(filename.with_suffix(".decolace.bak"))
+        starfile.write(star_data, filename, na_rep="None", overwrite=True, )
 
     @classmethod
     def read(cls, filename: Path):
-        star_data = starfile.read(filename)
+        star_data = starfile.read(filename, always_dict=True)
         project_info = star_data["project_info"].to_dict("records")[0]
-        acquisition_areas = star_data["acquisition_areas"]
-        acquisition_areas = [
-            AcquisitionAreaPreProcessing(**aa)
-            for aa in acquisition_areas.to_dict("records")
-        ]
+        acquisition_areas = []
+        if "acquisition_areas" in star_data:
+            acquisition_areas = star_data["acquisition_areas"]
+            acquisition_areas = [
+                AcquisitionAreaPreProcessing(**aa)
+                for aa in acquisition_areas.to_dict("records")
+            ]
         return cls(**project_info, acquisition_areas=acquisition_areas)
