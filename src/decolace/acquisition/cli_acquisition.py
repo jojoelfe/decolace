@@ -78,8 +78,8 @@ def new_session(
 
 @app.command()
 def save_microscope_settings(
-    name: str = typer.Option(..., help="Name of the session"),
-    directory: str = typer.Option(..., help="Directory to save session in"),
+    name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None , help="Directory to save session in"),
 ):
 
     session_o = load_session(name, directory)
@@ -90,8 +90,8 @@ def save_microscope_settings(
 @app.command()
 def set_beam_radius(
     beam_radius: float = typer.Argument(..., help="Beam radius in um"),
-    name: str = typer.Option(..., help="Name of the session"),
-    directory: str = typer.Option(..., help="Directory to save session in"),
+    name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory to save session in"),
 ):
     session_o = load_session(name, directory)
     session_o.state["beam_radius"] = beam_radius
@@ -138,8 +138,8 @@ def status(
 
 @app.command()
 def new_map(
-    session_name: str = typer.Option(..., help="Name of the session"),
-    directory: str = typer.Option(..., help="Directory to save session in"),
+    session_name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory to save session in"),
 ):
     session_o = load_session(session_name, directory)
     session_o.active_grid.take_map()
@@ -163,6 +163,7 @@ def show_exposures(
     type: DeCoData = typer.Argument(DeCoData.session),
     name: str = typer.Argument(None, help="Name of the session"),
     directory: str = typer.Argument(None, help="Directory to save session in"),
+    show_camera: bool = typer.Option(False, help="SHow the camera")
 ):
     import napari
 
@@ -188,8 +189,7 @@ def show_exposures(
         
         pos = np.concatenate(positions, axis = 0)
         order = np.concatenate(order, axis = 0)
-        print(pos.shape)
-        print(order.shape)
+        
         
         viewer = napari.view_points(
             pos,
@@ -199,6 +199,23 @@ def show_exposures(
             features={"order":np.array(order)},
             text=write_to_disktext
         )
+        #viewer.add_shapes(
+        #    area_o.state["corner_positions_specimen"][:, ::-1],
+        #    name="area",
+        #    face_color="#00000000",
+        #    edge_color="red",
+        #    edge_width=0.1,
+        #)
+        if show_camera:
+            viewer.add_points(
+                pos,
+                name="camera",
+                size=0.61,
+                face_color="#00000000",
+                edge_color="#00ff00",
+                symbol='square',
+                edge_width=0.02
+            )
         #viewer.add_shapes(
         #    np.array(corner_positions),
         #    name="area",
@@ -222,13 +239,7 @@ def show_exposures(
             features={"order":order},
             text=write_to_disktext
         )
-        viewer.add_shapes(
-            area_o.state["corner_positions_specimen"][:, ::-1],
-            name="area",
-            face_color="#00000000",
-            edge_color="red",
-            edge_width=0.1,
-        )
+        
     napari.run()
     typer.Exit()
 

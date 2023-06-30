@@ -12,7 +12,9 @@ try:
 except ModuleNotFoundError:
     print("Couldn't import serialem")
 from shapely import Polygon, affinity
+from contrasttransferfunction import CtfFit
 
+defocus_gradient = [-0.6,-2.0,10] 
 
 def _hexagonal_cover(polygon, radius):
     """
@@ -54,7 +56,6 @@ def _hexagonal_cover(polygon, radius):
     for j in range(-ny, ny):
         y = miny + offsety + (j * radius * 3 / 2)
         direction = int(((j % 2) - 0.5) * 2)
-        print(direction)
         for i in range(-nx*direction, nx*direction, direction):
             x = (
                 minx
@@ -88,8 +89,8 @@ class AcquisitionAreaSingle:
         self.state["record_speciment_to_camera"] = None
         self.state["record_IS_to_camera"] = None
 
-        self.state["count_threshold_for_beamshift"] = 2000
-        self.state["count_threshold_for_ctf"] = 2000
+        self.state["count_threshold_for_beamshift"] = 1500
+        self.state["count_threshold_for_ctf"] = 1500
 
         self.state["ctf_quality_threshold"] = 0.10
         self.state["ctf_res_threshold"] = 10.0
@@ -103,7 +104,7 @@ class AcquisitionAreaSingle:
         self.state["beamshift_calibration"] = {}
         self.state["beamshift_calibration"]["model"] = None
         self.state["beamshift_calibration"]["measurements"] = []
-
+        self.state["beamshift_correction"] = True
         # array (bool,n) indicating of position acquired
         self.state["positions_acquired"] = []
 
@@ -242,13 +243,16 @@ class AcquisitionAreaSingle:
         progress_callback=None,
     ):
         serialem.ChangeFocus(-1.0)
+        correction=0.0
+        self.state["desired_defocus"] = -1.0
+        cycle_defocus = False
         for index in range(len(self.state["acquisition_positions"])):
             start = timer()
             report = {}
             if self.state["positions_acquired"][index]:
                 continue
             if index == 0:
-                if initial_beamshift is not None:
+                if initial_beamshift is not None and self.state["beamshift_correction"]:
                     serialem.SetBeamShift(initial_beamshift[0], initial_beamshift[1])
                 if initial_defocus is not None:
                     serialem.SetDefocus(initial_defocus)
@@ -261,6 +265,7 @@ class AcquisitionAreaSingle:
                 np.array(self.state["acquisition_positions"][index])
                 - current_speciment_shift
             )
+            #print(self.state["acquisition_positions"][index])
             serialem.ImageShiftByMicrons(diff[0], diff[1])
             focus_prediction = None #self.predict_focus(
                 #self.state["acquisition_positions"][index]
@@ -268,16 +273,17 @@ class AcquisitionAreaSingle:
             if focus_prediction is not None and self.state['use_focus_prediction']:
                 report["using_focus_prediction"] = True
                 serialem.SetDefocus(focus_prediction)
-            beam_shift_prediction = self.predict_beamshift(
-                self.state["acquisition_positions"][index]
-            )
-            if beam_shift_prediction is not None:
-                report["using_beamshift_prediction"] = True
-                serialem.SetBeamShift(
-                    beam_shift_prediction[0], beam_shift_prediction[1]
+            if self.state["beamshift_correction"]:
+                beam_shift_prediction = self.predict_beamshift(
+                    self.state["acquisition_positions"][index]
                 )
+                if beam_shift_prediction is not None:
+                    report["using_beamshift_prediction"] = True
+                    serialem.SetBeamShift(
+                        beam_shift_prediction[0], beam_shift_prediction[1]
+                    )
             predictions = timer()
-            if established_lock and index % 5 != 0 and index > 50:
+            if established_lock and index % 5 != 0 and index > 50 and False:
                 self.state["positions_still_to_fasttrack"] = 1
                 serialem.EarlyReturnNextShot(0)         
             else:
@@ -297,7 +303,7 @@ class AcquisitionAreaSingle:
             #        progress_callback(report=report, acquisition_area=self)
             #    continue
             record = timer()
-            print(f"{predictions-start} {record-predictions}")
+            #print(f"{predictions-start} {record-predictions}")
             if self.state["positions_still_to_fasttrack"] > 0:
                 report["fasttracked"] = True
                 report["counts"] = 0
@@ -309,7 +315,7 @@ class AcquisitionAreaSingle:
             counts = serialem.ReportMeanCounts()
             report["counts"] = counts
 
-            if counts > self.state["count_threshold_for_beamshift"]:
+            if counts > self.state["count_threshold_for_beamshift"] and self.state["beamshift_correction"]:
                 report["correcting_beamshift"] = True
                 beam_shift_before_centering = np.array(serialem.ReportBeamShift())
                 serialem.CenterBeamFromImage(0, 0.4)
@@ -334,30 +340,45 @@ class AcquisitionAreaSingle:
                     progress_callback(report=report, acquisition_area=self)
                 continue
             serialem.FFT("A")
+            powerspectrum = np.asarray(serialem.bufferImage("AF"))
+            fit_result = CtfFit.fit_1d(
+                powerspectrum,
+                pixel_size_angstrom=4.24,
+                voltage_kv=300.0,
+                spherical_aberration_mm=2.7,
+                amplitude_contrast=0.07)
+            measured_defocus = fit_result.ctf.defocus1_angstroms / -10000
+            #print(fit_result)
             #serialem.Save()
-            ctf_results = serialem.CtfFind("A", -0.1, -12)
+            #ctf_results = serialem.CtfFind("A", -0.1, -12)
             #ctf_results = []
             #serialem.CropCenterToSize("A",700,700)
             
             #plot_results = serialem.Ctfplotter("A", -0.1,-7,1,0,15.0,1)
             #print(plot_results)
-            if len(ctf_results) < 6:
-                if progress_callback is not None:
-                    progress_callback(report=report, acquisition_area=self)
-                continue
-            report["measured_defocus"] = ctf_results[0]
-            report["ctf_cc"] = ctf_results[4]
-            report["ctf_res"] = ctf_results[5]
+            #if len(ctf_results) < 6:
+            #    if progress_callback is not None:
+            #        progress_callback(report=report, acquisition_area=self)
+            #    continue
+            report["measured_defocus"] = measured_defocus
+            report["ctf_cc"] = fit_result.cross_correlation
+            report["ctf_res"] = 0.0
             if (
-                ctf_results[4] < self.state["ctf_quality_threshold"]
-                or ctf_results[5] > self.state["ctf_res_threshold"]
+                fit_result.cross_correlation < 100.0
+                #ctf_results[4] < self.state["ctf_quality_threshold"]
+                #or ctf_results[5] > self.state["ctf_res_threshold"]
             ):
                 if progress_callback is not None:
                     progress_callback(report=report, acquisition_area=self)
                 serialem.ChangeFocus(-0.05)
                 continue
 
-            offset = self.state["desired_defocus"] - ctf_results[0]
+            # Set desired defocus
+            if cycle_defocus:
+                fraction_of_gradient = (np.cos((index % defocus_gradient[2])/defocus_gradient[2] * 2* np.pi) + 1) /2
+                self.state["desired_defocus"] = defocus_gradient[0] + fraction_of_gradient * (defocus_gradient[1]-defocus_gradient[0])
+                print(f"fraction: {fraction_of_gradient}, desired defocus: {self.state['desired_defocus']}")
+            offset = self.state["desired_defocus"] - measured_defocus
             if offset < 0.5:
                 self.state["defocus_calibration"]["measurements"].append(
                     [
@@ -391,7 +412,7 @@ class AcquisitionAreaSingle:
             if progress_callback is not None:
                 progress_callback(report=report, acquisition_area=self)
             others = timer()
-            print(f"{predictions-start} {record-predictions} {others-record}")
+            #print(f"{predictions-start} {record-predictions} {others-record}")
 
     def move_to_position(self):
         if self.state["navigator_center_index"] is not None:
