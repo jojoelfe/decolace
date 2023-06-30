@@ -1,7 +1,7 @@
 import glob
 import os
 import time
-from pathlib import Path
+from pathlib import Path, PurePath
 
 import numpy as np
 
@@ -38,9 +38,11 @@ class session:
         if len(potential_files) < 1:
             raise (FileNotFoundError("Couldn't find saved files"))
         most_recent = sorted(potential_files)[-1]
-        print(f"Loading file {most_recent}")
+        #print(f"Loading file {most_recent}")
         self.state = np.load(most_recent, allow_pickle=True).item()
         for grid_info in self.state["grids"]:
+            if not Path(grid_info[1]).exists():
+                grid_info[1] = Path(self.directory) / Path(grid_info[1]).parts[-1]
             self.grids.append(grid(grid_info[0], grid_info[1]))
             self.grids[-1].load_from_disk()
 

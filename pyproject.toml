@@ -56,6 +56,18 @@ extra-dependencies = [
   "pre-commit",
 ]
 
+[tool.hatch.envs.default.scripts]
+test = "pytest {args:tests}"
+test-cov = "coverage run -m pytest {args:tests}"
+cov-report = [
+  "- coverage combine",
+  "coverage report",
+]
+cov = [
+  "test-cov",
+  "cov-report",
+]
+
 [tool.pytest.ini_options]
 addopts = "-v -Wdefault --cov=decolace --cov-report=term-missing:skip-covered"
 pythonpath = ["src"]

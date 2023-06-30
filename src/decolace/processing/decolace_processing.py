@@ -58,7 +58,7 @@ def read_matches_data(database_filename: Path, tm_job_id: int) -> pd.DataFrame:
     with contextlib.closing(sqlite3.connect(database_filename)) as con:
         matches_data = pd.read_sql_query(
             f"SELECT IMAGE_ASSETS.FILENAME AS IMAGE_FILENAME,"
-            f" PROJECTION_RESULT_OUTPUT_FILE "
+            f" PROJECTION_RESULT_OUTPUT_FILE, SCALED_MIP_OUTPUT_FILE "
             f"FROM TEMPLATE_MATCH_LIST INNER JOIN IMAGE_ASSETS ON TEMPLATE_MATCH_LIST.IMAGE_ASSET_ID = IMAGE_ASSETS.IMAGE_ASSET_ID "
             f"WHERE TEMPLATE_MATCH_JOB_ID={tm_job_id}",
             con,
@@ -275,19 +275,19 @@ def create_montage(montage_metadata: dict, output_path_montage: Path):
         mrc.voxel_size = montage_metadata["montage"]["montage_pixel_size"].values[0]
 
 
-def adjust_metadata_for_matches(montage_data: dict, match_data: pd.DataFrame):
+def adjust_metadata_for_matches(montage_data: dict, match_data: pd.DataFrame, image: str = "PROJECTION_RESULT_OUTPUT_FILE"):
 
     # Create new column called key in tile data that coontaints the tile filename without
     # the part after the last undersocre
     montage_data["tiles"]["key"] = montage_data["tiles"]["tile_filename"].str.rsplit(
-        "_", 1, expand=True
+        "_", n=1, expand=True
     )[0]
     # Do the same for the match data
-    match_data["key"] = match_data["IMAGE_FILENAME"].str.rsplit("_", 1, expand=True)[0]
+    match_data["key"] = match_data["IMAGE_FILENAME"].str.rsplit("_", n=1, expand=True)[0]
 
     # Merge the two dataframes on the key column
     merged = pd.merge(montage_data["tiles"], match_data, on="key")
-    merged["tile_filename"] = merged["PROJECTION_RESULT_OUTPUT_FILE"]
+    merged["tile_filename"] = merged[image]
     montage_data["tiles"] = merged
     return montage_data
 
