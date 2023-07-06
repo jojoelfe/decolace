@@ -92,8 +92,8 @@ class AcquisitionAreaSingleState(BaseModel):
     positions_acquired: Optional[np.ndarray] = None
 
     beamshift_calibrations_required: int = 25
-    beamshift_calibration_measurements: list = []]
-    beamshift_correction: Optional[bool] = True
+    beamshift_calibration_measurements: list = []
+    beamshift_correction: bool = True
 
     tilt: float = 0.0
 
@@ -102,6 +102,9 @@ class AcquisitionAreaSingleState(BaseModel):
 
     positions_still_to_fasttrack: int = 0
     fasttrack: bool = False
+
+    class Config:
+        arbitrary_types_allowed = True
 
 class AcquisitionAreaSingle:
     state: AcquisitionAreaSingleState = AcquisitionAreaSingleState()
@@ -163,7 +166,7 @@ class AcquisitionAreaSingle:
             serialem.ImageShiftByStageDiff(dx, dy)
             corner_coordinates_specimen.append(serialem.ReportSpecimenShift())
             serialem.SetImageShift(0, 0)
-        self.state.corner_positions_specimen. = np.array(corner_coordinates_specimen)
+        self.state.corner_positions_specimen = np.array(corner_coordinates_specimen)
         self.state.corner_positions_stage_diff = np.array(
             corner_coordinates_stage_diff
         )
@@ -342,13 +345,13 @@ class AcquisitionAreaSingle:
                 raise ValueError("No navigator position set")
 
     def move_to_position_if_needed(self):
-        if self.state["navigator_center_index"] is not None:
+        if self.state.navigator_center_index is not None:
             wanted_stage_position = serialem.ReportOtherItem(
-                int(self.state["navigator_center_index"])
+                int(self.state.navigator_center_index)
             )
         else:
             wanted_stage_position = serialem.ReportOtherItem(
-                int(self.state["navigator_map_index"])
+                int(self.state.navigator_map_index)
             )
         stage_position = serialem.ReportStageXYZ()
         wanted_stage_position = np.array(
