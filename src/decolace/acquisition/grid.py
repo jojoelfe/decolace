@@ -74,7 +74,7 @@ class grid:
             else:
                 serialem.OpenNewFile(self.state["view_file"])
 
-    def eucentric(self, stage_height_offset=-33.0, do_euc=True):
+    def eucentric(self, stage_height_offset=-70.0, do_euc=True):
         print("Do")
         serialem.Copy("A", "K")  # Copy to buffer K
         if do_euc:
@@ -125,7 +125,7 @@ class grid:
     def initialize_acquisition_areas(self, navigator_ids):
         pass
 
-    def start_acquisition(self, initial_defocus=22.0, progress_callback=None):
+    def start_acquisition(self, initial_defocus=54.0, progress_callback=None):
         
         for index, aa in enumerate(self.acquisition_areas):
             if np.sum(aa.state["positions_acquired"]) == len(
