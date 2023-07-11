@@ -19,10 +19,10 @@ class AcquisitionAreaPreProcessing(BaseModel):
     ctffind_run: bool = False
     initial_tile_star: Union[Path, str] = None
     refined_tile_star: Union[Path, str] = None
-    montage_star: Union[Path, str] = None
-    montage_image: Union[Path, str] = None
-    experimental_condition: str = ""
-    notes: str = ""
+    montage_star: Optional[Union[Path, str]] = None
+    montage_image: Optional[Union[Path, str]] = None
+    experimental_condition: str = "Test what"
+    notes: str = "Test"
 
     @validator("*")
     def enforce_none(cls, v):

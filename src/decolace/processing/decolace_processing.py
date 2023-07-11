@@ -32,8 +32,8 @@ def read_data_from_cistem(database_filename: Path) -> pd.DataFrame:
             " MOVIE_ASSETS.PIXEL_SIZE as movie_pixel_size,"
             " IMAGE_ASSETS.X_SIZE,"
             " IMAGE_ASSETS.Y_SIZE"
-            "FROM IMAGE_ASSETS "
-            "INNER JOIN MOVIE_ASSETS ON MOVIE_ASSETS.MOVIE_ASSET_ID == IMAGE_ASSETS.PARENT_MOVIE_ID",
+            " FROM IMAGE_ASSETS"
+            " INNER JOIN MOVIE_ASSETS ON MOVIE_ASSETS.MOVIE_ASSET_ID == IMAGE_ASSETS.PARENT_MOVIE_ID",
             con,
         )
         df2 = pd.read_sql_query(
@@ -74,7 +74,7 @@ def read_decolace_data(decolace_filename: Path) -> dict:
 def create_tile_metadata(
     cistem_data: pd.DataFrame, decolace_data: dict, output_filename: Path
 ):
-    IS_to_camera = decolace_data["record_IS_to_camera"].reshape(2, 2)
+    IS_to_camera = decolace_data["microscope_settings"]["R"]["IS_to_camera"].reshape(2, 2)
 
     result_tiles = pd.DataFrame(
         {
