@@ -1,9 +1,24 @@
 from pathlib import Path
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Annotated, Any, TypeVar
 
 import pandas as pd
 import starfile
-from pydantic import BaseModel, validator
+from math import isnan
+
+from pydantic import BaseModel
+from pydantic import BeforeValidator
+
+
+def coerce_nan_to_none(x: Any) -> Any:
+    if type(x) is str:
+        return x
+    if isnan(x):
+        return None
+    return x
+
+T = TypeVar('T')
+
+NoneOrNan = Annotated[Optional[T], BeforeValidator(coerce_nan_to_none)]
 
 
 class AcquisitionAreaPreProcessing(BaseModel):
@@ -12,24 +27,19 @@ class AcquisitionAreaPreProcessing(BaseModel):
     decolace_grid_info_path: Union[Path, str] = None
     decolace_session_info_path: Union[Path, str] = None
     frames_folder: Union[Path, str] = None
-    view_frames_path: Union[Path, str] = None
-    view_image_path: Union[Path, str] = None
-    cistem_project: Union[Path, str] = None
+    view_frames_path: NoneOrNan[Union[Path, str]] = None
+    view_image_path: NoneOrNan[Union[Path, str]] = None
+    cistem_project: NoneOrNan[Union[Path, str]] = None
     unblur_run: bool = False
     ctffind_run: bool = False
-    initial_tile_star: Union[Path, str] = None
-    refined_tile_star: Union[Path, str] = None
-    montage_star: Optional[Union[Path, str]] = None
-    montage_image: Optional[Union[Path, str]] = None
-    experimental_condition: str = "Test what"
+    initial_tile_star: NoneOrNan[Union[Path, str]] = None
+    refined_tile_star: NoneOrNan[Union[Path, str]] = None
+    montage_star: NoneOrNan[Union[Path, str]] = None
+    montage_image: NoneOrNan[Union[Path, str]] = None
+    experimental_condition: str = "Test"
     notes: str = "Test"
 
-    @validator("*")
-    def enforce_none(cls, v):
-        if v == "None" or v == "nan":
-            return None
-        return v
-
+  
 class MatchTemplateRun(BaseModel):
     run_name: str
     run_id: int
@@ -44,12 +54,7 @@ class MatchTemplateRun(BaseModel):
 
 
 
-    @validator("*")
-    def enforce_none(cls, v):
-        if v == "None" or v == "nan":
-            return None
-        return v
-
+   
 
 class ProcessingProject(BaseModel):
     project_name: str

@@ -43,8 +43,14 @@ class session:
         for grid_info in self.state["grids"]:
             if not Path(grid_info[1]).exists():
                 grid_info[1] = Path(self.directory) / Path(grid_info[1]).parts[-1]
-            self.grids.append(grid(grid_info[0], grid_info[1]))
-            self.grids[-1].load_from_disk()
+            
+            try:
+                new_grid = grid(grid_info[0], grid_info[1])
+                new_grid.load_from_disk()
+                self.grids.append(new_grid)
+            except FileNotFoundError:
+                print(f"Can't load grid {grid_info[0]}")
+                
 
     def add_grid(self, name, tilt):
         self.grids.append(grid(name, Path(self.directory, name).as_posix()))

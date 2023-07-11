@@ -13,7 +13,6 @@ from rich.logging import RichHandler
 from decolace.processing.project_managment import ProcessingProject, AcquisitionAreaPreProcessing, MatchTemplateRun
 from decolace.acquisition.session import session
 
-from decolace.processing.create_cistem_projects_for_session import create_project_for_area 
 from decolace.processing.decolace_processing import read_data_from_cistem, read_decolace_data
 
 
@@ -82,10 +81,16 @@ def add_session(
     typer.echo(f"Added {num_aa} acquisition areas from {num_grids} grids to {project.project_name}")
     project.write()
 
+
+
 @app.command()
 def generate_cistem_projects(
     project_main: Path = typer.Option(None, help="Path to wanted project file"),
+    pixel_size: float = typer.Option(...,help="Movie pixelsize"),
+    exposure_dose: float = typer.Option(...,help="Dose in e/A/frame")
 ):
+    from decolace.processing.create_cistem_projects_for_session import create_project_for_area 
+
     if project_main is None:
         project_path = Path(glob.glob("*.decolace")[0])
     project = ProcessingProject.read(project_path)
@@ -94,18 +99,30 @@ def generate_cistem_projects(
         if aa.cistem_project is not None:
             continue
         typer.echo(f"Creating cistem project for {aa.area_name}")
-        cistem_project_path = create_project_for_area(aa.area_name, project_path.parent.absolute() / "cistem_projects", aa.frames_folder)
+        cistem_project_path = create_project_for_area(aa.area_name, project_path.parent.absolute() / "cistem_projects", aa.frames_folder, pixel_size=pixel_size, exposure_dose=exposure_dose, bin_to=project.processing_pixel_size)
         aa.cistem_project = cistem_project_path
         typer.echo(f"Saved as {cistem_project_path}")
     project.write()
    
 @app.command()
 def run_unblur(
-    project_main: Path = typer.Option(None, help="Path to wanted project file")
+    project_main: Path = typer.Option(None, help="Path to wanted project file"),
+    cistem_path: str = typer.Option("/scratch/paris/elferich/cisTEM/build/je_combined_Intel-gpu-debug-static/src/", help="Path to cistem binaries"),
+    num_cores: int = typer.Option(10, help="Number of cores to use"),
+    cmd_prefix: str = typer.Option("", help="Prefix of run command"),
+    cmd_suffix: str = typer.Option("", help="Suffix of run command")
 ):
     from pycistem.programs import unblur
     import pycistem
-    pycistem.set_cistem_path("/scratch/paris/elferich/cisTEM/build/je_combined_Intel-gpu-debug-static/src/")
+    pycistem.set_cistem_path(cistem_path)
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(message)s",
+        handlers=[
+            RichHandler(),
+            #logging.FileHandler(current_output_directory / "log.log")
+        ]
+    )
 
     if project_main is None:
         project_path = Path(glob.glob("*.decolace")[0])
@@ -117,7 +134,7 @@ def run_unblur(
         typer.echo(f"Running unblur for {aa.area_name}")
         pars = unblur.parameters_from_database(aa.cistem_project,decolace=True)
 
-        res = unblur.run(pars,num_procs=40)
+        res = unblur.run(pars,num_procs=num_cores,cmd_prefix=cmd_prefix,cmd_suffix=cmd_suffix,save_output=True,save_output_path="/tmp/output")
 
         unblur.write_results_to_database(aa.cistem_project,pars,res)
         aa.unblur_run = True
@@ -134,7 +151,6 @@ def status(
     project = ProcessingProject.read(project_path)
 
     table = Table(title="Project Status")
-    table.add_column("Movies/Images")
     table.add_column("AA")
     table.add_column("cisTEM")
     table.add_column("Unblur")
@@ -142,13 +158,10 @@ def status(
     table.add_column("Montage")
 
     for aa in project.acquisition_areas:
-        num_images = get_num_images(aa.cistem_project)
-        num_movies = get_num_movies(aa.cistem_project)
         table.add_row(
             aa.area_name,
-            f"{num_movies}/{num_images}",
-            "✓" if aa.cistem_project is not None else ":x:",
-            "✓" if aa.unblur_run else ":x:",
+            f"✓ {get_num_movies(aa.cistem_project)}" if aa.cistem_project is not None else ":x:",
+            f"✓ {get_num_images(aa.cistem_project)}" if aa.unblur_run else ":x:",
             "✓" if aa.ctffind_run else ":x:",
             "✓" if aa.montage_image is not None else ":x:",
         )
@@ -170,6 +183,33 @@ def update_database(
         pro.database.CheckandUpdateSchema()
         pro.Close(True,True)
 
+@app.command()
+def redo_projects(
+    project_main: Path = typer.Option(None, help="Path to wanted project file")
+):
+   
+    if project_main is None:
+        project_path = Path(glob.glob("*.decolace")[0])
+    project = ProcessingProject.read(project_path)
+
+    for aa in project.acquisition_areas:
+        aa.cistem_project = None
+    
+    project.write()
+
+@app.command()
+def redo_unblur(
+    project_main: Path = typer.Option(None, help="Path to wanted project file")
+):
+   
+    if project_main is None:
+        project_path = Path(glob.glob("*.decolace")[0])
+    project = ProcessingProject.read(project_path)
+
+    for aa in project.acquisition_areas:
+        aa.unblur_run = False
+    
+    project.write()
 
 @app.command()
 def redo_ctffind(
