@@ -156,7 +156,7 @@ def create_tile_metadata(
 def create_montage_metadata(
     tile_data: pd.DataFrame,
     output_path_metadata: Path,
-    binning: int,
+    binning: float,
     output_path_montage: Path,
 ):
     # Create the montage metadata
@@ -211,7 +211,9 @@ def create_montage_metadata(
 
 
 def create_montage(montage_metadata: dict, output_path_montage: Path):
+    import time
     # Create the montage
+    prev = time.perf_counter()
     montage = np.zeros(
         (
             int(montage_metadata["montage"]["montage_y_size"].values[0]),
@@ -227,11 +229,14 @@ def create_montage(montage_metadata: dict, output_path_montage: Path):
         dtype=np.float32,
     )
     binning = montage_metadata["montage"]["montage_binning"].values[0]
+    print(f"Initialisation took {time.perf_counter() - prev} seconds")
+    prev = time.perf_counter()
     for item in track(
         montage_metadata["tiles"].iterrows(),
         total=len(montage_metadata["tiles"].index),
         description="Creating montage",
     ):
+        prev = time.perf_counter()
         item = item[1]
         tile = mrcfile.open(item["tile_filename"]).data.copy()
         tile = tile[0]
@@ -245,9 +250,12 @@ def create_montage(montage_metadata: dict, output_path_montage: Path):
             int(tile.shape[0] / binning),
             int(tile.shape[1] / binning),
         )
+        print(f"Opening took {time.perf_counter() - prev} seconds")
+        prev = time.perf_counter()
         tile = resize(tile, tile_binned_dimensions, anti_aliasing=True)
         mask_float = resize(mask_float, tile_binned_dimensions, anti_aliasing=True)
-
+        print(f"Resizing took {time.perf_counter() - prev} seconds")
+        prev = time.perf_counter()
         insertion_slice = (
             slice(
                 int(item["tile_y_offset_binned"]),
@@ -269,10 +277,15 @@ def create_montage(montage_metadata: dict, output_path_montage: Path):
             tile *= item["tile_intensity_correction"]
 
         montage[insertion_slice] += tile
-
+        print(f"Insertion took {time.perf_counter() - prev} seconds")
+        
+    median_value = np.median(montage[np.nonzero(mask_montage)])
+    montage[mask_montage == 0] = median_value
+    prev = time.perf_counter()
     with mrcfile.new(output_path_montage, overwrite=True) as mrc:
         mrc.set_data(montage)
         mrc.voxel_size = montage_metadata["montage"]["montage_pixel_size"].values[0]
+    print(f"Writing montage took {time.perf_counter() - prev} seconds")
 
 
 def adjust_metadata_for_matches(montage_data: dict, match_data: pd.DataFrame, image: str = "PROJECTION_RESULT_OUTPUT_FILE"):
@@ -530,11 +543,11 @@ def assemble_matches(montage_info, refine_info):
     info["tile_x"] = info["cisTEMOriginalXPosition"]
     info["tile_y"] = info["cisTEMOriginalYPosition"]
     info["cisTEMOriginalXPosition"] = (
-        info["tile_x"] + info["tile_image_shift_pixel_x"] * info["cisTEMPixelSize"]
+        info["tile_x"] + info["tile_x_offset"] * info["cisTEMPixelSize"]
     )
 
     info["cisTEMOriginalYPosition"] = (
-        info["tile_y"] + info["tile_image_shift_pixel_y"] * info["cisTEMPixelSize"]
+        info["tile_y"] + info["tile_y_offset"] * info["cisTEMPixelSize"]
     )
 
     info["cisTEMOriginalImageFilename"] = montage_info["montage"][
