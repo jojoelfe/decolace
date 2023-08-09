@@ -34,7 +34,9 @@ dependencies = [
   "pydantic",
   "starfile",
   "mdocfile",
-  "mrcfile"
+  "mrcfile",
+  "contrasttransferfunction",
+  "pydantic"
 ]
 
 [project.scripts]
