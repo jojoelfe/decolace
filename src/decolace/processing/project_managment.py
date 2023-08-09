@@ -1,4 +1,4 @@
-from pathlib import Path
+from pathlib import Path, PosixPath
 from typing import List, Union, Optional, Annotated, Any, TypeVar
 
 import pandas as pd
@@ -13,6 +13,8 @@ def coerce_nan_to_none(x: Any) -> Any:
     if x is None:
         return x
     if type(x) is str:
+        return x
+    if type(x) is PosixPath:
         return x
     if isnan(x):
         return None
