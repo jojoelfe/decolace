@@ -74,7 +74,7 @@ class grid:
             else:
                 serialem.OpenNewFile(self.state["view_file"])
 
-    def eucentric(self, stage_height_offset=-70.0, do_euc=True):
+    def eucentric(self, stage_height_offset=-64.5, do_euc=True):
         print("Do")
         serialem.Copy("A", "K")  # Copy to buffer K
         if do_euc:
