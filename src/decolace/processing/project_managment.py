@@ -10,6 +10,8 @@ from pydantic import BeforeValidator
 
 
 def coerce_nan_to_none(x: Any) -> Any:
+    if x is None:
+        return x
     if type(x) is str:
         return x
     if isnan(x):
@@ -24,8 +26,8 @@ NoneOrNan = Annotated[Optional[T], BeforeValidator(coerce_nan_to_none)]
 class AcquisitionAreaPreProcessing(BaseModel):
     area_name: str
     decolace_acquisition_area_info_path: Union[Path, str] = None
-    decolace_grid_info_path: Union[Path, str] = None
-    decolace_session_info_path: Union[Path, str] = None
+    decolace_grid_info_path: NoneOrNan[Union[Path, str]] = None
+    decolace_session_info_path: NoneOrNan[Union[Path, str]] = None
     frames_folder: Union[Path, str] = None
     view_frames_path: NoneOrNan[Union[Path, str]] = None
     view_image_path: NoneOrNan[Union[Path, str]] = None

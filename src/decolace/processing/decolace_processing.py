@@ -74,7 +74,10 @@ def read_decolace_data(decolace_filename: Path) -> dict:
 def create_tile_metadata(
     cistem_data: pd.DataFrame, decolace_data: dict, output_filename: Path
 ):
-    IS_to_camera = decolace_data["microscope_settings"]["R"]["IS_to_camera"].reshape(2, 2)
+    try:
+        IS_to_camera = decolace_data["microscope_settings"]["R"]["IS_to_camera"].reshape(2, 2)
+    except KeyError:
+        IS_to_camera = decolace_data['record_IS_to_camera'].reshape(2, 2)
 
     result_tiles = pd.DataFrame(
         {
@@ -210,7 +213,7 @@ def create_montage_metadata(
     return results
 
 
-def create_montage(montage_metadata: dict, output_path_montage: Path):
+def create_montage(montage_metadata: dict, output_path_montage: Path, erode_mask: int = 0):
     import time
     # Create the montage
     prev = time.perf_counter()
@@ -229,7 +232,7 @@ def create_montage(montage_metadata: dict, output_path_montage: Path):
         dtype=np.float32,
     )
     binning = montage_metadata["montage"]["montage_binning"].values[0]
-    print(f"Initialisation took {time.perf_counter() - prev} seconds")
+    #print(f"Initialisation took {time.perf_counter() - prev} seconds")
     prev = time.perf_counter()
     for item in track(
         montage_metadata["tiles"].iterrows(),
@@ -246,15 +249,20 @@ def create_montage(montage_metadata: dict, output_path_montage: Path):
         mask = mask[0]
         mask.dtype = np.uint8
         mask_float = mask / 255.0
+        if erode_mask > 0:
+            mask_float = mask_float > 0.5
+            mask_float = binary_erosion(mask_float, iterations=erode_mask)
+            mask_float = mask_float.astype(np.float32)
+            mask_float *= 1.0
         tile_binned_dimensions = (
             int(tile.shape[0] / binning),
             int(tile.shape[1] / binning),
         )
-        print(f"Opening took {time.perf_counter() - prev} seconds")
+        #print(f"Opening took {time.perf_counter() - prev} seconds")
         prev = time.perf_counter()
         tile = resize(tile, tile_binned_dimensions, anti_aliasing=True)
         mask_float = resize(mask_float, tile_binned_dimensions, anti_aliasing=True)
-        print(f"Resizing took {time.perf_counter() - prev} seconds")
+        #print(f"Resizing took {time.perf_counter() - prev} seconds")
         prev = time.perf_counter()
         insertion_slice = (
             slice(
@@ -277,7 +285,7 @@ def create_montage(montage_metadata: dict, output_path_montage: Path):
             tile *= item["tile_intensity_correction"]
 
         montage[insertion_slice] += tile
-        print(f"Insertion took {time.perf_counter() - prev} seconds")
+        #print(f"Insertion took {time.perf_counter() - prev} seconds")
         
     median_value = np.median(montage[np.nonzero(mask_montage)])
     montage[mask_montage == 0] = median_value
@@ -285,7 +293,7 @@ def create_montage(montage_metadata: dict, output_path_montage: Path):
     with mrcfile.new(output_path_montage, overwrite=True) as mrc:
         mrc.set_data(montage)
         mrc.voxel_size = montage_metadata["montage"]["montage_pixel_size"].values[0]
-    print(f"Writing montage took {time.perf_counter() - prev} seconds")
+    #print(f"Writing montage took {time.perf_counter() - prev} seconds")
 
 
 def adjust_metadata_for_matches(montage_data: dict, match_data: pd.DataFrame, image: str = "PROJECTION_RESULT_OUTPUT_FILE"):
@@ -323,12 +331,12 @@ def find_tile_pairs(tile_data: pd.DataFrame, distance_threshold_A: float):
     return row_pairs
 
 
-def calculate_shifts(row_pairs: list, num_proc: int = 1, erode_mask: int = 0):
+def calculate_shifts(row_pairs: list, num_proc: int = 1, erode_mask: int = 0, filter_cutoff_frequency_ratio: float = 0.02, filter_order: float = 4.0, mask_size_cutoff: int = 100, overlap_ratio: float = 0.1):
     pool = multiprocessing.Pool(processes=num_proc)
 
     # map the worker function to the input data using the pool
     results = pool.imap_unordered(
-        partial(determine_shift_by_cc, erode_mask=erode_mask), row_pairs
+        partial(determine_shift_by_cc, erode_mask=erode_mask, filter_cutoff_frequency_ratio=filter_cutoff_frequency_ratio, filter_order=filter_order,mask_size_cutoff=mask_size_cutoff, overlap_ratio=overlap_ratio), row_pairs
     )
     shifts = []
     # use the rich.progress module to track the progress of the results
