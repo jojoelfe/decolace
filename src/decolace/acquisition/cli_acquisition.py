@@ -121,6 +121,14 @@ def euc_and_nice_view(
     session_o.active_grid.nice_view()
     session_o.active_grid.write_to_disk()
 
+@app.command()
+def nice_view(
+    session_name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory to save session in"),
+):
+    session_o = load_session(session_name, directory)
+    session_o.active_grid.nice_view()
+    session_o.active_grid.write_to_disk()
 
 @app.command()
 def status(

@@ -88,3 +88,50 @@ class session:
             )
             settings["IS_to_camera"] = np.array(serialem.ISToCameraMatrix(0))
             self.state["microscope_settings"][mode] = settings
+    
+    def adjust_beam(self, coverage=0.9):
+        from contrasttransferfunction.spectrumhelpers import radial_average
+        #Get pixel size
+        camera_properties = serialem.CameraProperties()
+        pixel_size = camera_properties[4]
+        x_dim = camera_properties[0]
+        y_dim = camera_properties[1]
+        s_dim = min(x_dim,y_dim)
+        s_dim_um = s_dim * pixel_size * 0.001
+        print(f"Pixel size is {pixel_size} at current magnification. Smallest camera dimension is {s_dim} pixels and {s_dim_um} um.")
+
+        #Set binning to 4 and prevent saving of frames and alignment
+        serialem.SetBinning("R",4)
+        serialem.SetDoseFracParams("R",0,0,0)
+
+
+        center_tries = 0
+        adjustment = 99
+        while adjustment > (1-coverage)*0.05 * s_dim_um:
+            beam_shift_before_centering = np.array(serialem.ReportBeamShift())
+            serialem.Record()
+            serialem.CenterBeamFromImage(0, 1.0)
+            beam_shift_after_centering = np.array(serialem.ReportBeamShift())
+            adjustment = np.linalg.norm(beam_shift_before_centering-beam_shift_after_centering)
+            print(f"Adjusting by {adjustment}")
+            center_tries+=1
+            if center_tries > 10:
+                print(f"Error could not center beam")
+                return
+        
+        #for defocus in range(0,120,10):
+        #    serialem.SetDefocus(defocus)
+
+        #    serialem.Record()
+        #    serialem.CenterBeamFromImage(0, 1.0)
+        #    serialem.Record()
+        #    serialem.CenterBeamFromImage(0, 1.0)
+        #    serialem.Record()
+        #    serialem.Save()
+        beam_image = np.asarray(serialem.bufferImage("A"))
+        np.save("beam_image_from_sem.npy",beam_image)
+        #shortest = min(beam_image.shape)
+        #cropped_beam_image = beam_image[]
+        #return(radial_average(beam_image))
+        
+
