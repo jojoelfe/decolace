@@ -639,18 +639,65 @@ def assemble_matches(
 @app.command()
 def filter_matches(
     ctx: typer.Context,
+    erode_mask: int = 128
 ):
     """Uses a mixture of strategies to remove false positive matches"""
 
     import starfile
+    import mrcfile
+    import numpy as np
+    from scipy.ndimage import binary_erosion
 
     if ctx.obj.match_template_job is None:
         typer.echo("No match template job given")
         raise typer.Exit()
     for aa in ctx.obj.acquisition_areas:
         refined_matches_starfile = Path(aa.cistem_project).parent / "Assets" / "TemplateMatching" / f"{aa.area_name}_{ctx.obj.match_template_job.run_id}_tm_package_refined.star"
+        if not refined_matches_starfile.exists():
+            typer.echo(f"No refined matches for {aa.area_name}")
+            continue
         refined_matches = starfile.read(refined_matches_starfile)
+        print(f"Starting with {len(refined_matches)} matches")
         refined_matches = refined_matches[refined_matches["cisTEMScore"] >= 8.0]
+        print(f"After 8.0 score criterion {len(refined_matches)} matches")
+        refined_matches["tile_mask_filename"] = refined_matches["cisTEMOriginalImageFilename"].str.replace(".mrc", "_mask.mrc")
+        refined_matches["tile_mask_filename"].str.replace("'", "")
+        for mask_filename in refined_matches["tile_mask_filename"].unique():
+        # Open mask and convert to 0-1 floats
+            if mask_filename is None:
+                continue
+            with mrcfile.open(mask_filename.strip("'")) as mask:
+                mask_data = np.copy(mask.data[0])
+                mask_data.dtype = np.uint8
+                mask_float = mask_data / 255.0
+                if erode_mask > 0:
+                    binary_mask = mask_float > 0.5
+                    binary_mask = binary_erosion(binary_mask, iterations=erode_mask)
+                    mask_float = binary_mask * 1.0
+            #
+            peak_indices = refined_matches.loc[
+                refined_matches["tile_mask_filename"] == mask_filename
+            ].index.tolist()
+            for i in peak_indices:
+                pixel_position_x = int(refined_matches.loc[i, "cisTEMOriginalXPosition"] / refined_matches.loc[i, "cisTEMPixelSize"])
+                pixel_position_y = int(refined_matches.loc[i, "cisTEMOriginalYPosition"] / refined_matches.loc[i, "cisTEMPixelSize"])
+                try:
+                    refined_matches.loc[i, "mask_value"] = mask_float[
+                        pixel_position_y,
+                        pixel_position_x,
+                    ]
+                    if pixel_position_x < 128 or pixel_position_y < 128:
+                        refined_matches.loc[i, "display"] = False
+                        continue
+                    if pixel_position_x > mask_float.shape[1] - 128 or pixel_position_y > mask_float.shape[0] - 128:
+                        refined_matches.loc[i, "display"] = False
+                        continue
+                except IndexError:
+                    refined_matches.loc[i, "mask_value"] = 0
+                if refined_matches.loc[i, "mask_value"] > 0.7:
+                    refined_matches.loc[i, "display"] = True
+        refined_matches = refined_matches[refined_matches["display"] == True]
+        print(f"After masked area removal {len(refined_matches)} matches")
         filtered_matches_starfile = Path(aa.cistem_project).parent / "Assets" / "TemplateMatching" / f"{aa.area_name}_{ctx.obj.match_template_job.run_id}_tm_package_filtered.star"
         starfile.write(refined_matches, filtered_matches_starfile, overwrite=True)
 
