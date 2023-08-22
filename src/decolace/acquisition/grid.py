@@ -3,13 +3,10 @@ import os
 import time
 from functools import partial
 from pathlib import Path
+from pydantic import BaseModel
 
 import numpy as np
 
-try:
-    import serialem
-except ModuleNotFoundError:
-    print("Couldn't import serialem")
 
 from .acquisition_area import AcquisitionAreaSingle
 

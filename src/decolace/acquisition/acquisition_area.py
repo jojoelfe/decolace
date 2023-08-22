@@ -9,10 +9,7 @@ from sklearn.linear_model import HuberRegressor
 from timeit import default_timer as timer
 from pydantic import BaseModel
 from typing import Optional
-try:
-    import serialem
-except ModuleNotFoundError:
-    print("Couldn't import serialem")
+
 from shapely import Polygon, affinity
 from contrasttransferfunction import CtfFit
 

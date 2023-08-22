@@ -3,6 +3,7 @@ import os
 from enum import Enum
 from pathlib import Path
 
+
 import typer
 from rich.panel import Panel
 from rich.progress import Progress
@@ -11,6 +12,9 @@ import shapely
 from .acquisition_area import AcquisitionAreaSingle
 from .session import session
 import signal
+from types import SimpleNamespace
+from .serialem_helper import set_sem_ip, set_sem_port, connect_sem
+
 
 class GracefulKiller:
   kill_now = False
@@ -22,10 +26,7 @@ class GracefulKiller:
     print("Recieved SIGTERM")
     self.kill_now = True
 
-try:
-    import serialem
-except ModuleNotFoundError:
-    print("Couldn't import serialem")
+
 
 app = typer.Typer()
 
@@ -75,6 +76,15 @@ def new_session(
     session_o.write_to_disk()
     typer.echo(f"Created new session {name} in {directory}")
 
+@app.command()
+def prepare_beam_vacuum(
+    name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None , help="Directory to save session in"),
+):
+    session_o = load_session(name, directory)
+    session_o.prepare_beam_vacuum()
+    session_o.write_to_disk()
+    typer.echo(f"Prepared beam vacuum for session {session_o.name}")
 
 @app.command()
 def save_microscope_settings(
@@ -94,9 +104,17 @@ def set_beam_radius(
     directory: str = typer.Option(None, help="Directory to save session in"),
 ):
     session_o = load_session(name, directory)
-    session_o.state["beam_radius"] = beam_radius
+    session_o.state.beam_radius = beam_radius
     session_o.write_to_disk()
     typer.echo(f"Set beam radius to {beam_radius} for session {session_o.name}")
+
+@app.command()
+def print_session_state(
+    name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None , help="Directory to save session in"),
+):
+    session_o = load_session(name, directory)
+    typer.echo(session_o.state)
 
 @app.command()
 def new_grid(
@@ -404,3 +422,18 @@ def acquire(
                         raise typer.Abort()
 
     session_o.active_grid.start_acquisition(progress_callback=progress_callback)
+
+@app.callback()
+def main(
+    ctx: typer.Context,
+    serialem_port: int = typer.Option(None, help="Serial port for SEM"),
+    serialem_ip: str = typer.Option(None, help="IP address for SEM"),
+):
+    """DeCoLACE acquisition commands"""
+    
+    if serialem_port is not None:
+        set_sem_port(serialem_port)
+    if serialem_ip is not None:
+        set_sem_ip(serialem_ip)
+    ctx.obj = SimpleNamespace()
+

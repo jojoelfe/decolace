@@ -8,26 +8,30 @@ from rich import print
 #import pandas as pd
 import logging
 from rich.logging import RichHandler
+from typer.core import TyperGroup
 
-from decolace.processing.project_managment import ProcessingProject, AcquisitionAreaPreProcessing
+from decolace.processing.project_managment import ProcessingProject, AcquisitionAreaPreProcessing, MatchTemplateRun
 
-#from decolace.processing.project_managment import ProcessingProject, AcquisitionAreaPreProcessing, MatchTemplateRun
-#from decolace.acquisition.session import session
+class OrderCommands(TyperGroup):
+  def list_commands(self, ctx: typer.Context):
+    """Return list of commands in the order appear."""
+    return list(self.commands)    # get commands using self.commands
 
-#from decolace.processing.decolace_processing import read_data_from_cistem, read_decolace_data
-
-
-app = typer.Typer()
+app = typer.Typer(
+    cls=OrderCommands,
+)
 
 
 @app.command()
 def create_project(
     name: str = typer.Argument(..., help="Name of project"),
     directory: Optional[Path] = typer.Option(
-        None, help="Directory to create project in"
+        None, help="Directory to create project in, current directory by default"
     ),
 ):
-
+    """
+    Create a new DeCoLACE processing project
+    """
     if directory is None:
         directory = Path.cwd()
     project = ProcessingProject(project_name = name, project_path= directory)
@@ -36,19 +40,17 @@ def create_project(
 
 @app.command()
 def add_acquisition_area(
-    project_main: Path = typer.Option(None, help="Path to wanted project file"),
+    ctx: typer.Context,
     area_name: str = typer.Argument(..., help="Name of the area"),
     session_name: str = typer.Argument(..., help="Name of session"),
     grid_name: str = typer.Argument(..., help="Name of grid"),
     area_directory: Path = typer.Argument(..., help="Path to area directory"),
-
 ):
+    """
+    Add a single acquisition area to a DeCoLACE processing project
+    """
     from decolace.acquisition.acquisition_area import AcquisitionAreaSingle
     import numpy as np
-
-    if project_main is None:
-        project_path = Path(glob.glob("*.decolace")[0])
-    project = ProcessingProject.read(project_path)
 
     aa = AcquisitionAreaSingle(area_name, area_directory.as_posix())
     aa.load_from_disk()
@@ -61,25 +63,24 @@ def add_acquisition_area(
                 decolace_session_info_path = None,
                 frames_folder = aa.frames_directory,
             )
-    project.acquisition_areas.append(aa_pre)
-    project.write()
+    ctx.obj.project.acquisition_areas.append(aa_pre)
+    ctx.obj.project.write()
     typer.echo(f"Added acquisition area {aa.name} ")
 
 
 @app.command()
 def add_session(
-    project_main: Path = typer.Option(None, help="Path to wanted project file"),
+    ctx: typer.Context,
     session_name: str = typer.Argument(..., help="Name of session"),
     session_directory: Path = typer.Argument(..., help="Path to session directory"),
     ignore_grids: List[str] = typer.Option(["cross"], help="Grids to ignore"),
 ):
+    """
+    Add a DeCoLACE acquisition session to a DeCoLACE processing project
+    """
     from decolace.acquisition.session import session
     import numpy as np
     
-    if project_main is None:
-        project_path = Path(glob.glob("*.decolace")[0])
-    project = ProcessingProject.read(project_path)
-
     my_session = session(session_name, session_directory.as_posix())
     session_path = sorted(Path(my_session.directory).glob(f"{my_session.name}*.npy"))[-1]
     my_session.load_from_disk()
@@ -101,45 +102,44 @@ def add_session(
                 decolace_session_info_path = session_path,
                 frames_folder = aa.frames_directory,
             )
-            project.acquisition_areas.append(aa_pre)
+            ctx.obj.project.acquisition_areas.append(aa_pre)
             num_aa += 1
     typer.echo(f"Added {num_aa} acquisition areas from {num_grids} grids to {project.project_name}")
-    project.write()
-
-
+    ctx.obj.project.write()
 
 @app.command()
 def generate_cistem_projects(
-    project_main: Path = typer.Option(None, help="Path to wanted project file"),
+    ctx: typer.Context,
     pixel_size: float = typer.Option(...,help="Movie pixelsize"),
     exposure_dose: float = typer.Option(...,help="Dose in e/A/frame")
 ):
+    """
+    Generate cisTEM projects for each acquisition area
+    """
     from decolace.processing.create_cistem_projects_for_session import create_project_for_area 
 
-    if project_main is None:
-        project_path = Path(glob.glob("*.decolace")[0])
-    project = ProcessingProject.read(project_path)
-
-    for aa in project.acquisition_areas:
+    for aa in ctx.obj.acquisition_areas:
         if aa.cistem_project is not None:
             continue
         typer.echo(f"Creating cistem project for {aa.area_name}")
-        cistem_project_path = create_project_for_area(aa.area_name, project_path.parent.absolute() / "cistem_projects", aa.frames_folder, pixel_size=pixel_size, exposure_dose=exposure_dose, bin_to=project.processing_pixel_size)
+        cistem_project_path = create_project_for_area(aa.area_name, ctx.obj.project.project_path.parent.absolute() / "cistem_projects", aa.frames_folder, pixel_size=pixel_size, exposure_dose=exposure_dose, bin_to=project.processing_pixel_size)
         aa.cistem_project = cistem_project_path
         typer.echo(f"Saved as {cistem_project_path}")
-    project.write()
+    ctx.obj.project.write()
    
 @app.command()
 def run_unblur(
-    project_main: Path = typer.Option(None, help="Path to wanted project file"),
-    cistem_path: str = typer.Option("/scratch/paris/elferich/cisTEM/build/je_combined_Intel-gpu-debug-static/src/", help="Path to cistem binaries"),
+    ctx: typer.Context,
     num_cores: int = typer.Option(10, help="Number of cores to use"),
     cmd_prefix: str = typer.Option("", help="Prefix of run command"),
     cmd_suffix: str = typer.Option("", help="Suffix of run command")
 ):
+    """
+    Run unblur for each acquisition area
+    """
     from pycistem.programs import unblur
     import pycistem
-    pycistem.set_cistem_path(cistem_path)
+    pycistem.set_cistem_path(ctx.obj.cistem_path)
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(message)s",
@@ -148,12 +148,8 @@ def run_unblur(
             #logging.FileHandler(current_output_directory / "log.log")
         ]
     )
-
-    if project_main is None:
-        project_path = Path(glob.glob("*.decolace")[0])
-    project = ProcessingProject.read(project_path)
-
-    for aa in project.acquisition_areas:
+    
+    for aa in ctx.obj.acquisition_areas:
         if aa.unblur_run:
             continue
         typer.echo(f"Running unblur for {aa.area_name}")
@@ -163,7 +159,7 @@ def run_unblur(
 
         unblur.write_results_to_database(aa.cistem_project,pars,res)
         aa.unblur_run = True
-        project.write()
+        ctx.obj.project.write()
 
 
 def process_experimental_conditions(acquisition_areas: List[AcquisitionAreaPreProcessing]):
@@ -439,13 +435,12 @@ def run_montage(
 
 @app.command()
 def run_matchtemplate(
+    ctx: typer.Context,
     template: Path = typer.Option(None, help="Path to wanted template file"),
-    match_template_job_id: int = typer.Option(None, help="ID of template match job"),
     angular_step: float = typer.Option(3.0, help="Angular step for template matching"),
     in_plane_angular_step: float = typer.Option(2.0, help="In plane angular step for template matching"),
     defocus_step: float = typer.Option(0.0, help="Defocus step for template matching"),
     defocus_range: float = typer.Option(0.0, help="Defocus range for template matching"),
-    project_main: Path = typer.Option(None, help="Path to wanted project file")
 ):
     from pycistem.programs import match_template, generate_gpu_prefix, generate_num_procs
     import pycistem
@@ -474,34 +469,30 @@ def run_matchtemplate(
         "sofia": 8,
         "manchester": 8,
     }   
-    if project_main is None:
-        project_path = Path(glob.glob("*.decolace")[0])
-    project = ProcessingProject.read(project_path)
+    
     new_mtr = True
-    if match_template_job_id is None:
-        if len(project.match_template_runs) == 0:
+    if ctx.obj.match_template_job is None:
+        if len(ctx.obj.project.match_template_runs) == 0:
             match_template_job_id = 1
         else:
-            match_template_job_id = max([mtr.run_id  for mtr in project.match_template_runs]) + 1
+            match_template_job_id = max([mtr.run_id  for mtr in ctx.obj.project.match_template_runs]) + 1
         if template is None:
             typer.echo("No template file or template match job id given")
             return
     else:
-        if match_template_job_id in [mtr.run_id  for mtr in project.match_template_runs]:
-            new_mtr = False
-            # Get position in array
-            array_position = [mtr.run_id  for mtr in project.match_template_runs].index(match_template_job_id)
-            template = Path(project.match_template_runs[array_position].template_path)
-            angular_step = project.match_template_runs[array_position].angular_step
-            in_plane_angular_step = project.match_template_runs[array_position].in_plane_angular_step
-            defocus_step = project.match_template_runs[array_position].defocus_step
-            defocus_range = project.match_template_runs[array_position].defocus_range
-
-            typer.echo(f"Template match job id already exists, continuing job {project.match_template_runs[array_position].run_name}")
-            typer.echo(f"template_filename={template.absolute().as_posix()}, angular_step={angular_step}, in_plane_angular_step={in_plane_angular_step} defous_step={defocus_step}, defocus_range={defocus_range}, decolace=True)")
+        new_mtr = False
+        # Get position in array
+        template = Path(ctx.obj.match_template_job.template_path)
+        angular_step = ctx.obj.match_template_job.angular_step
+        in_plane_angular_step = ctx.obj.match_template_job.in_plane_angular_step
+        defocus_step = ctx.obj.match_template_job.defocus_step
+        defocus_range = ctx.obj.match_template_job.defocus_range
+        match_template_job_id = ctx.obj.match_template_job.run_id
+        typer.echo(f"Template match job id already exists, continuing job {ctx.obj.match_template_job.run_name}")
+        typer.echo(f"template_filename={template.absolute().as_posix()}, angular_step={angular_step}, in_plane_angular_step={in_plane_angular_step} defous_step={defocus_step}, defocus_range={defocus_range}, decolace=True)")
 
     if new_mtr:
-        project.match_template_runs.append(
+        ctx.obj.project.match_template_runs.append(
             MatchTemplateRun(
                 run_name=f"matchtemplate_{match_template_job_id}",
                 run_id=match_template_job_id,
@@ -512,11 +503,11 @@ def run_matchtemplate(
                 defocus_range=defocus_range,
             )
         )
-        project.write()
+        ctx.obj.project.write()
             
 
     all_image_info=[]
-    for aa in project.acquisition_areas:
+    for aa in ctx.obj.acquisition_areas:
         typer.echo(f"Running matchtemplate for {aa.area_name}")
         image_info = match_template.parameters_from_database(aa.cistem_project, template_filename=template.absolute().as_posix(), match_template_job_id=match_template_job_id, decolace=True)
         orig_num= len(image_info)
@@ -634,6 +625,95 @@ def assemble_matches(
         result = dp.assemble_matches(montage_data, matches_data)
 
         starfile.write(result, output_star_path, overwrite=True)
+
+
+def get_distance_to_edge(orig_image_filename,refined_matches,binning_boxsize):
+    from scipy.ndimage import distance_transform_edt
+    import mrcfile
+    import numpy as np
+    image_filename = orig_image_filename.strip("'")
+    
+    # Compute distance to mask edge
+    mask_filename = image_filename.replace(".mrc", "_mask.mrc")
+    if not Path(mask_filename).exists():
+        typer.echo(f"No mask for {image_filename}")
+        return
+    with mrcfile.open(mask_filename.strip("'")) as mask:
+        mask_data = np.copy(mask.data[0])
+        mask_data.dtype = np.uint8
+        mask_binary = mask_data > 128
+        distance_transform = distance_transform_edt(mask_binary)
+    peak_indices = refined_matches.loc[
+        refined_matches["cisTEMOriginalImageFilename"] == orig_image_filename
+    ].index.tolist()
+    for i in peak_indices:
+        pixel_position_x = int(refined_matches.loc[i, "cisTEMOriginalXPosition"] / refined_matches.loc[i, "cisTEMPixelSize"])
+        pixel_position_y = int(refined_matches.loc[i, "cisTEMOriginalYPosition"] / refined_matches.loc[i, "cisTEMPixelSize"])
+        try:
+            refined_matches.loc[i, "LACEBeamEdgeDistance"] = distance_transform[
+                pixel_position_y,
+                pixel_position_x,
+            ]
+        except IndexError:
+            refined_matches.loc[i, "LACEBeamEdgeDistance"] = 0
+    # Compute variance after binning
+    with mrcfile.open(image_filename) as image:
+        micrograph = image.data
+        if micrograph.ndim == 3:
+            micrograph = micrograph[0]
+    for i in peak_indices:
+        pixel_position_x = int(refined_matches.loc[i, "cisTEMOriginalXPosition"] / refined_matches.loc[i, "cisTEMPixelSize"])
+        pixel_position_y = int(refined_matches.loc[i, "cisTEMOriginalYPosition"] / refined_matches.loc[i, "cisTEMPixelSize"])
+        if pixel_position_x < binning_boxsize // 2 or pixel_position_y < binning_boxsize // 2:
+            refined_matches.loc[i, "LACEVarianceAfterBinning"] = -1
+            continue
+        if pixel_position_x > micrograph.shape[1] - binning_boxsize // 2 or pixel_position_y > micrograph.shape[0] - binning_boxsize // 2:
+            refined_matches.loc[i, "LACEVarianceAfterBinning"] = -1
+            continue
+        binning_box = micrograph[
+            pixel_position_y - binning_boxsize // 2 : pixel_position_y + binning_boxsize // 2,
+            pixel_position_x - binning_boxsize // 2 : pixel_position_x + binning_boxsize // 2,
+        ].copy()
+        binning_box -= np.mean(binning_box)
+        binning_box = binning_box / np.sqrt(np.var(binning_box))
+        # Bin by 4
+        binning_box = binning_box.reshape(
+            binning_box.shape[0] // 4,
+            4,
+            binning_box.shape[1] // 4,
+            4,
+        ).mean(axis=(1, 3))
+        refined_matches.loc[i, "LACEVarianceAfterBinning"] = np.var(binning_box)
+
+
+@app.command()
+def precompute_filters(
+    ctx: typer.Context,
+    binning_boxsize: int = typer.Option(256, help="Binning boxsize"),
+):
+    """ Precalculates values used to filter out potential false-positives or otherwise problematic matches"""
+
+    import starfile
+    import mrcfile
+    import numpy as np
+    from functools import partial
+    import concurrent.futures
+    if ctx.obj.match_template_job is None:
+        typer.echo("No match template job given")
+        raise typer.Exit()
+    for aa in ctx.obj.acquisition_areas:
+        refined_matches_starfile = Path(aa.cistem_project).parent / "Assets" / "TemplateMatching" / f"{aa.area_name}_{ctx.obj.match_template_job.run_id}_tm_package_refined.star"
+        if not refined_matches_starfile.exists():
+            typer.echo(f"No refined matches for {aa.area_name}")
+            continue
+        refined_matches = starfile.read(refined_matches_starfile)
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            fn = partial(get_distance_to_edge, refined_matches=refined_matches, binning_boxsize=binning_boxsize)
+            executor.map(fn, refined_matches["cisTEMOriginalImageFilename"].unique())
+
+            
+        filtered_matches_starfile = Path(aa.cistem_project).parent / "Assets" / "TemplateMatching" / f"{aa.area_name}_{ctx.obj.match_template_job.run_id}_tm_package_filtervalues.star"
+        starfile.write(refined_matches, filtered_matches_starfile, overwrite=True)  
 
 
 @app.command()
@@ -763,9 +843,10 @@ def calculate_changes_during_refine_template(
 def main(
     ctx: typer.Context,
     project: Path = typer.Option(None, help="Path to wanted project file"),
-    acquisition_areas: List[int] = typer.Option(None, help="List of acquisition areas to process"),
+    acquisition_area_ids: List[int] = typer.Option(None, help="List of acquisition areas ids to process"),
+    acquisition_area_names: List[str] = typer.Option(None, help="List of acquisition areas names to process"),
     match_template_job_id: int = typer.Option(None, help="ID of template match job"),
-
+    cistem_path: str = typer.Option("/groups/cryoadmin/software/CISTEM/je_dev/", help="Path to cistem binaries"),
 ):
     """DeCoLACE processing pipeline"""
     if project is None:
@@ -775,13 +856,14 @@ def main(
             raise typer.Exit()
         project = Path(potential_projects[0])
     project_object = ProcessingProject.read(project)
-    if len(acquisition_areas) > 0:
-        aas_to_process = [aa for i, aa in enumerate(project_object.acquisition_areas) if i in acquisition_areas]
-    else:
-        aas_to_process = project_object.acquisition_areas
+    aas_to_process = project_object.acquisition_areas
+    if len(acquisition_area_names) > 0:
+        aas_to_process = [aa for aa in project_object.acquisition_areas if aa.area_name in acquisition_area_names]
+    if len(acquisition_area_ids) > 0:
+        aas_to_process = [aa for i, aa in enumerate(project_object.acquisition_areas) if i in acquisition_area_ids]
     if match_template_job_id is not None:
         array_position = [mtr.run_id  for mtr in project_object.match_template_runs].index(match_template_job_id)
         mtr = project_object.match_template_runs[array_position]
     else:
         mtr = None
-    ctx.obj = SimpleNamespace(project = project_object, acquisition_areas = aas_to_process, match_template_job = mtr)
+    ctx.obj = SimpleNamespace(project = project_object, acquisition_areas = aas_to_process, match_template_job = mtr, cistem_path = cistem_path)
