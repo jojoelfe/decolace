@@ -4,30 +4,37 @@ import time
 from functools import partial
 from pathlib import Path
 from pydantic import BaseModel
+from typing import List, Optional
 
 import numpy as np
 
 
 from .acquisition_area import AcquisitionAreaSingle
 
+class GridState(BaseModel):
+    acquisition_areas: List[str] = []
+    desired_defocus: float = -1.0
+    tilt: float = 0.0
+    view_file: Optional[str] = None
+    view_frames_directory: Optional[str] = None
 
 class grid:
+    state: GridState = GridState()
     def __init__(self, name, directory, beam_radius=100, defocus=-1.0, tilt=0.0):
         self.state = {}
         self.name = name
         self.directory = directory
         Path(directory).mkdir(parents=True, exist_ok=True)
-        self.state["acquisition_areas"] = []
         self.acquisition_areas = []
-        self.state["beam_radius"] = beam_radius
-        self.state["desired_defocus"] = defocus
-        self.state["tilt"] = tilt
+        self.state.beam_radius = beam_radius
+        self.state.desired_defocus = defocus
+        self.state.tilt = tilt
 
-        self.state["view_file"] = Path(directory, f"{name}_views.mrc").as_posix()
-        self.state["view_frames_directory"] = Path(directory, "viewframes").as_posix()
-        Path(self.state["view_frames_directory"]).mkdir(parents=True, exist_ok=True)
-        self.state["view_frames_directory"] = Path(
-            self.state["view_frames_directory"]
+        self.state.view_file = Path(directory, f"{name}_views.mrc").as_posix()
+        self.state.view_frames_directory = Path(directory, "viewframes").as_posix()
+        Path(self.state.view_frames_directory).mkdir(parents=True, exist_ok=True)
+        self.state.view_frames_directory = Path(
+            self.state.view_frames_directory
         ).as_posix()
 
     def save_navigator(self):

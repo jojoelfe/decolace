@@ -857,6 +857,7 @@ def main(
         project = Path(potential_projects[0])
     project_object = ProcessingProject.read(project)
     aas_to_process = project_object.acquisition_areas
+    print(acquisition_area_names)
     if len(acquisition_area_names) > 0:
         aas_to_process = [aa for aa in project_object.acquisition_areas if aa.area_name in acquisition_area_names]
     if len(acquisition_area_ids) > 0:
