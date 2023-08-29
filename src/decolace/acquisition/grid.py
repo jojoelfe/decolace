@@ -5,6 +5,7 @@ from functools import partial
 from pathlib import Path
 from pydantic import BaseModel
 from typing import List, Optional
+from .serialem_helper import connect_sem
 
 import numpy as np
 
@@ -17,16 +18,15 @@ class GridState(BaseModel):
     tilt: float = 0.0
     view_file: Optional[str] = None
     view_frames_directory: Optional[str] = None
+    stepwise: bool = False
 
 class grid:
     state: GridState = GridState()
-    def __init__(self, name, directory, beam_radius=100, defocus=-1.0, tilt=0.0):
-        self.state = {}
+    def __init__(self, name, directory, defocus=-1.0, tilt=0.0):
         self.name = name
         self.directory = directory
         Path(directory).mkdir(parents=True, exist_ok=True)
         self.acquisition_areas = []
-        self.state.beam_radius = beam_radius
         self.state.desired_defocus = defocus
         self.state.tilt = tilt
 
@@ -38,6 +38,7 @@ class grid:
         ).as_posix()
 
     def save_navigator(self):
+        serialem = connect_sem()
         serialem.SaveNavigator(
             Path(self.directory, f"{self.name}_navigator.nav").as_posix()
         )
@@ -58,27 +59,28 @@ class grid:
         most_recent = sorted(potential_files)[-1]
         self.state = np.load(most_recent, allow_pickle=True).item()
         self.acquisition_areas = []
-        for area in self.state["acquisition_areas"]:
+        for area in self.state.acquisition_areas:
             self.acquisition_areas.append(AcquisitionAreaSingle(area[0], Path(self.directory) / area[0]))
             self.acquisition_areas[-1].load_from_disk()
 
     def ensure_view_file_is_open(self):
-
+        serialem = connect_sem()
         if serialem.ReportFileNumber() < 0:
-            if Path(self.state["view_file"]).exists():
-                serialem.OpenOldFile(self.state["view_file"])
+            if Path(self.state.view_file).exists():
+                serialem.OpenOldFile(self.state.view_file)
             else:
-                serialem.OpenNewFile(self.state["view_file"])
+                serialem.OpenNewFile(self.state.view_file)
             return
         current_file = serialem.ReportCurrentFilename()
 
-        if Path(current_file).as_posix() != self.state["view_file"]:
-            if Path(self.state["view_file"]).exists():
-                serialem.OpenOldFile(self.state["view_file"])
+        if Path(current_file).as_posix() != self.state.view_file:
+            if Path(self.state.view_file).exists():
+                serialem.OpenOldFile(self.state.view_file)
             else:
-                serialem.OpenNewFile(self.state["view_file"])
+                serialem.OpenNewFile(self.state.view_file)
 
     def eucentric(self, stage_height_offset=-64.5, do_euc=True):
+        serialem = connect_sem()
         print("Do")
         serialem.Copy("A", "K")  # Copy to buffer K
         if do_euc:
@@ -86,7 +88,7 @@ class grid:
         serialem.View()
         serialem.AlignTo("K")
         serialem.ResetImageShift()
-        serialem.TiltTo(self.state["tilt"])
+        serialem.TiltTo(self.state.tilt)
         serialem.View()
         serialem.Copy("A", "K")  # Copy to buffer K
         serialem.MoveStage(0, 0, stage_height_offset / 3)
@@ -103,13 +105,14 @@ class grid:
         serialem.ResetImageShift()
 
     def nice_view(self):
+        serialem = connect_sem()
         serialem.GoToLowDoseArea("V")
         serialem.ChangeFocus(-250)
         serialem.SetExposure("V", 10)
         serialem.SetDoseFracParams("V", 1, 1, 0)
         serialem.SetFrameTime("V", 1)
         serialem.SetFolderForFrames(
-            os.path.abspath(self.state["view_frames_directory"])
+            os.path.abspath(self.state.view_frames_directory)
         )
         serialem.View()
         serialem.ChangeFocus(250)
@@ -119,6 +122,7 @@ class grid:
         serialem.Save()
 
     def take_map(self):
+        serialem = connect_sem()
         serialem.View()
         self.ensure_view_file_is_open()
         serialem.Save()
@@ -129,15 +133,15 @@ class grid:
     def initialize_acquisition_areas(self, navigator_ids):
         pass
 
-    def start_acquisition(self, initial_defocus=54.0, progress_callback=None):
-        
+    def start_acquisition(self, initial_defocus, progress_callback=None):
+        serialem = connect_sem()
         for index, aa in enumerate(self.acquisition_areas):
-            if np.sum(aa.state["positions_acquired"]) == len(
-                aa.state["positions_acquired"]
+            if np.sum(aa.state.positions_acquired) == len(
+                aa.state.positions_acquired
             ):
                 continue
             serialem.SetImageShift(0.0, 0.0)
-            if np.sum(aa.state["positions_acquired"]) == 0:
+            if np.sum(aa.state.positions_acquired) == 0:
                 progress_callback(
                     grid=self, acquisition_area=aa, report=None, type="start_new_area"
                 )
@@ -155,7 +159,7 @@ class grid:
             serialem.GoToLowDoseArea("R")
             initial_beamshift = None
             if index > 0:
-                initial_beamshift = self.acquisition_areas[index-1].predict_beamshift(aa.state['acquisition_positions'][0])
+                initial_beamshift = self.acquisition_areas[index-1].predict_beamshift(aa.state.acquisition_positions[0])
 
 
             serialem.ManageDewarsAndPumps(-1)

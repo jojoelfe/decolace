@@ -87,6 +87,36 @@ def prepare_beam_vacuum(
     typer.echo(f"Prepared beam vacuum for session {session_o.name}")
 
 @app.command()
+def prepare_beam_cross(
+    name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None , help="Directory to save session in"),
+):
+    session_o = load_session(name, directory)
+    session_o.prepare_beam_cross()
+    session_o.write_to_disk()
+    typer.echo(f"Prepared beam vacuum for session {session_o.name}")
+
+@app.command()
+def print_session_state(
+    name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None , help="Directory to save session in"),
+): 
+    session_o = load_session(name, directory)
+    print(session_o.state)
+
+@app.command()
+def set_session_state(
+    name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None , help="Directory to save session in"),
+    key: str = typer.Argument(...),
+    value: float = typer.Argument(...),
+): 
+    session_o = load_session(name, directory)
+    session_o.state.__dict__.update({key:value})
+    session_o.write_to_disk()
+    print(session_o.state)
+
+@app.command()
 def save_microscope_settings(
     name: str = typer.Option(None, help="Name of the session"),
     directory: str = typer.Option(None , help="Directory to save session in"),
@@ -96,17 +126,6 @@ def save_microscope_settings(
     session_o.add_current_setting()
     session_o.write_to_disk()
     typer.echo(f"Saved microscope settings for session {session_o.name}")
-
-@app.command()
-def set_beam_radius(
-    beam_radius: float = typer.Argument(..., help="Beam radius in um"),
-    name: str = typer.Option(None, help="Name of the session"),
-    directory: str = typer.Option(None, help="Directory to save session in"),
-):
-    session_o = load_session(name, directory)
-    session_o.state.beam_radius = beam_radius
-    session_o.write_to_disk()
-    typer.echo(f"Set beam radius to {beam_radius} for session {session_o.name}")
 
 @app.command()
 def print_session_state(
@@ -206,9 +225,9 @@ def show_exposures(
         positions = []
         corner_positions = []
         for i, aa in enumerate(grid_o.acquisition_areas):
-            order.append(np.array(range(len(aa.state["acquisition_positions"]))))
+            order.append(np.array(range(len(aa.state.acquisition_positions))))
             
-            pos = aa.state["acquisition_positions"][:, ::-1]
+            pos = aa.state.acquisition_positions[:, ::-1]
             # Concatenat i to pos along axis 1
             pos = np.concatenate((np.ones((len(pos), 1)) * i, pos), axis=1)
             positions.append(pos)
@@ -220,7 +239,7 @@ def show_exposures(
         viewer = napari.view_points(
             pos,
             name="exposures",
-            size=aa.state["beam_radius"] * 2,
+            size=session_o.state.beam_radius * 2,
             face_color="#00000000",
             features={"order":np.array(order)},
             text=write_to_disktext
@@ -250,7 +269,7 @@ def show_exposures(
 
     if type == DeCoData.area:
         area_o = load_area(name, directory)
-        order = np.array(range(len(area_o.state["acquisition_positions"])))
+        order = np.array(range(len(area_o.state.acquisition_positions)))
         write_to_disktext = {
             'string': '{order}',
             'size': 10,
@@ -258,9 +277,9 @@ def show_exposures(
             'translation': np.array([0, 0]),
          }
         viewer = napari.view_points(
-            area_o.state["acquisition_positions"][:, ::-1],
+            area_o.state.acquisition_positions[:, ::-1],
             name="exposures",
-            size=area_o.state["beam_radius"] * 2,
+            size=area_o.state.beam_radius * 2,
             face_color="#00000000",
             features={"order":order},
             text=write_to_disktext
@@ -280,12 +299,56 @@ def set_active_grid(
     session_o.write_to_disk()
     typer.echo(f"Set active grid to {name} for session {session_o.name}")
 
+@app.command()
+def skip_area(
+    name: str = typer.Argument(..., help="Name of the grid"),
+    session_name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory the session is saved in"),
+):
+    session_o = load_session(session_name, directory)
+    for aa in session_o.active_grid.acquisition_areas:
+        if aa.name == name:
+            aa.state.positions_acquired = np.zeros(
+                (aa.state.acquisition_positions.shape[0]), dtype="bool"
+            )
+            aa.state.positions_acquired[:] = True
+            typer.echo(f"Skipping {aa.name}")
+            aa.write_to_disk()
+
+
+
+@app.command()
+def setup_lamellae(
+    session_name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory to save session in"),
+):
+    session_o = load_session(session_name, directory)
+
+    import napari
+    from magicgui import magicgui, magic_factory
+    from multiprocessing import Pool
+    viewer = napari.Viewer()
+
+    def get_nice_view(session_o):
+        serialem = connect_sem()
+        session_o.active_grid.nice_view()
+
+    @magic_factory(
+            call_button='Get Nice View',
+
+    )
+    def nice_view_button() -> napari.types.LayerDataTuple:
+        pool = Pool(processes=1)
+        image = pool.map(get_nice_view,[session_o])[0]
+        existing_data = viewer.layers
+        
 
 @app.command()
 def setup_areas(
     session_name: str = typer.Option(None, help="Name of the session"),
     directory: str = typer.Option(None, help="Directory to save session in"),
 ):
+    serialem = connect_sem()
     session_o = load_session(session_name, directory)
     
     num_items = serialem.ReportNumTableItems()
@@ -316,13 +379,13 @@ def setup_areas(
             map_id = area[0,0]
             if np.sum(area[:,0] - map_id) != 0:
                 raise("Error: Map ID is not the same for all points in the polygon")
-            name = f"area{len(session_o.active_grid.state['acquisition_areas'])+2}"
+            name = f"area{len(session_o.active_grid.state.acquisition_areas)+2}"
             polygon = shapely.geometry.Polygon(area[:,1:3])
-            aa = AcquisitionAreaSingle(name,Path(session_o.active_grid.directory,name).as_posix(),beam_radius=session_o.state["beam_radius"],tilt=session_o.active_grid.state["tilt"])   
+            aa = AcquisitionAreaSingle(name,Path(session_o.active_grid.directory,name).as_posix(),tilt=session_o.active_grid.state.tilt)   
             aa.initialize_from_napari(map_navids[int(map_id)], [polygon.centroid.y, polygon.centroid.x], area[:,1:3])
-            aa.calculate_acquisition_positions_from_napari()
+            aa.calculate_acquisition_positions_from_napari(beam_radius=session_o.state.beam_radius)
             aa.write_to_disk()
-            session_o.active_grid.state["acquisition_areas"].append([aa.name,aa.directory])
+            session_o.active_grid.state.acquisition_areas.append([aa.name,aa.directory])
         session_o.active_grid.write_to_disk()
         session_o.active_grid.save_navigator()
              
@@ -340,13 +403,14 @@ def acquire(
     session_name: str = typer.Option(None, help="Name of the session"),
     directory: str = typer.Option(None, help="Directory to save session in"),
     stepwise: bool = typer.Option(False, help="Acquire stepwise"),
+    defocus_offset: float = typer.Option(6.0)
 ):
     killer = GracefulKiller()
     session_o = load_session(session_name, directory)
-    session_o.active_grid.state["stepwise"] = stepwise
+    session_o.active_grid.state.stepwise = stepwise
     total_shots = sum(
         [
-            len(aa.state["acquisition_positions"])
+            len(aa.state.acquisition_positions)
             for aa in session_o.active_grid.acquisition_areas
         ]
     )
@@ -369,7 +433,7 @@ def acquire(
             )
             progress.reset(
                 aa_task,
-                total=len(acquisition_area.state["acquisition_positions"]),
+                total=len(acquisition_area.state.acquisition_positions),
                 description=f"{acquisition_area.name}",
             )
             progress.start_task(aa_task)
@@ -380,7 +444,7 @@ def acquire(
         if report is not None:
             progress.update(aa_task, advance=1)
             progress.update(grid_task, advance=1)
-            log_string = f"{report['position']}/{len(acquisition_area.state['acquisition_positions'])} "
+            log_string = f"{report['position']}/{len(acquisition_area.state.acquisition_positions)} "
             if "using_focus_prediction" in report:
                 log_string += "FP :green_heart: "
             else:
@@ -407,8 +471,8 @@ def acquire(
 
             progress.log(log_string)
             if killer.kill_now:
-                grid.state["stepwise"] = True
-            if grid.state["stepwise"]:
+                grid.state.stepwise = True
+            if grid.state.stepwise:
                 cont = typer.confirm("Continue?")
                 if not cont:
                     save = typer.confirm("Save?")
@@ -416,12 +480,12 @@ def acquire(
                         acquisition_area.write_to_disk()
                     continous = typer.confirm("Continous:")
                     if continous:
-                        grid.state["stepwise"] = False
+                        grid.state.stepwise = False
                     else:
                         print("Aborting!")
                         raise typer.Abort()
 
-    session_o.active_grid.start_acquisition(progress_callback=progress_callback)
+    session_o.active_grid.start_acquisition(initial_defocus=session_o.state.fringe_free_focus_cross_grating-defocus_offset,progress_callback=progress_callback)
 
 @app.callback()
 def main(

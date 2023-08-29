@@ -64,10 +64,10 @@ class session:
 
     def add_grid(self, name, tilt):
         self.grids.append(grid(name, Path(self.directory, name).as_posix()))
-        self.grids[-1].state["tilt"] = tilt
+        self.grids[-1].state.tilt = tilt
         self.grids[-1].write_to_disk()
         self.state.grids.append([name, Path(self.directory, name).as_posix()])
-        self.state.active_grid = len(self.state["grids"]) - 1
+        self.state.active_grid = len(self.state.grids) - 1
 
     @property
     def active_grid(self):
@@ -99,8 +99,66 @@ class session:
                 serialem.SpecimenToCameraMatrix(0)
             )
             settings["IS_to_camera"] = np.array(serialem.ISToCameraMatrix(0))
-            self.microscope_settings[mode] = settings
+            self.state.microscope_settings[mode] = settings
     
+
+    def prepare_beam_cross(self):
+        serialem = connect_sem()
+        from contrasttransferfunction.spectrumhelpers import radial_average
+        serialem.SetBinning("R",4)
+        serialem.SetExposure("R",1)
+        serialem.SetDoseFracParams("R",0,0,0)
+
+        center_tries = 0
+        adjustment = 99
+        while adjustment > 0.01 * self.state.beam_radius:
+            beam_shift_before_centering = np.array(serialem.ReportBeamShift())
+            serialem.Record()
+            serialem.CenterBeamFromImage(0, 1.0)
+            beam_shift_after_centering = np.array(serialem.ReportBeamShift())
+            adjustment = np.linalg.norm(beam_shift_before_centering-beam_shift_after_centering)
+            print(f"Adjusting by {adjustment}")
+            center_tries+=1
+            if center_tries > 10:
+                print(f"Error could not center beam")
+                return
+        def calculate_fringe_free_score(defocus):
+            serialem.SetDefocus(defocus)
+            serialem.Record()
+            serialem.CenterBeamFromImage(0, 1.0)
+            serialem.Record()
+            serialem.CenterBeamFromImage(0, 1.0)
+            serialem.Record()
+
+            beam_image = np.asarray(serialem.bufferImage("A"))
+            # Crop out largest possbile square from the center of slice
+            # Get the dimensions of the array
+            rows, cols = beam_image.shape
+
+            # Calculate the size of the center square
+            size = min(rows, cols)
+
+            # Calculate the starting indices for the slice
+            start_row = (rows - size) // 2
+            start_col = (cols - size) // 2
+
+            # Slice the array to get the center square
+            center = beam_image[start_row:start_row+size, start_col:start_col+size]
+            ra = radial_average(center)
+            
+            minimal_slope = np.diff(ra).min()
+            return minimal_slope
+
+        from scipy.optimize import minimize_scalar
+
+        res = minimize_scalar(calculate_fringe_free_score, 
+                              bounds=(self.state.fringe_free_focus_vacuum-5.0, self.state.fringe_free_focus_vacuum+5.0), 
+                              method='bounded',
+                              options={"maxiter":10,"disp":True})
+        self.state.fringe_free_focus_cross_grating = res.x
+        serialem.SetDefocus(res.x)
+        serialem.Record()
+
     def prepare_beam_vacuum(self, coverage=0.9):
         serialem = connect_sem()
         from contrasttransferfunction.spectrumhelpers import radial_average
@@ -154,7 +212,7 @@ class session:
             start_col = (cols - size) // 2
 
             # Slice the array to get the center square
-            center = slice[start_row:start_row+size, start_col:start_col+size]
+            center = beam_image[start_row:start_row+size, start_col:start_col+size]
             ra = radial_average(center)
             
             minimal_slope = np.diff(ra).min()
@@ -162,33 +220,46 @@ class session:
 
         from scipy.optimize import minimize_scalar
 
-        res = minimize_scalar(calculate_fringe_free_score, bounds=(self.state.min_defocus_for_ffsearch, self.state.max_defocus_for_ffsearch), method='bounded')
+        res = minimize_scalar(calculate_fringe_free_score, 
+                              bounds=(self.state.min_defocus_for_ffsearch, self.state.max_defocus_for_ffsearch), 
+                              method='bounded',
+                              options={"maxiter":10,"disp":True})
         self.state.fringe_free_focus_vacuum = res.x
         serialem.SetDefocus(res.x)
         serialem.Record()
         # Optimize beam size
 
-        beam_diameter = serialem.MeasureBeamDiameter()
-
+        beam_diameter = serialem.MeasureBeamSize()
         wanted_beam_diameter = coverage * s_dim_um
+        print(f"dia {beam_diameter} wanted {wanted_beam_diameter}")
 
         for i in range(3):
 
             current_IA = serialem.ReportIlluminatedArea()
-            new_IA = current_IA * wanted_beam_diameter / beam_diameter
+            print(f"current_IA {current_IA}")
+            new_IA = current_IA * wanted_beam_diameter / beam_diameter[0]
+            print(f"new_IA {new_IA}")
             serialem.SetIlluminatedArea(new_IA)
+            serialem.UpdateLowDoseParams("R",1)
             serialem.Record()
-            beam_diameter = serialem.MeasureBeamDiameter()
-        serialem.UpdateLowDoseParams("R")
-        self.state.beam_radius = beam_diameter / 2
+            beam_diameter = serialem.MeasureBeamSize()
+            print(f"dia {beam_diameter} wanted {wanted_beam_diameter}")
+
+        self.state.beam_radius = beam_diameter[0] / 2
         beam_image = np.asarray(serialem.bufferImage("A"))
         # Get the average value in the center of the image
-        center = int(beam_image.shape/2)
-        half_width = int(self.state.beam_radius / pixel_size / 2)
-        center_value = np.mean(beam_image[center[0]-half_width:center[0]+half_width,center[1]-half_width:center[1]+half_width])
+        centery = int(beam_image.shape[0]/2)
+        centerx = int(beam_image.shape[1]/2)
+        print(beam_image.shape)
+        half_width = int((self.state.beam_radius * 1000) / (pixel_size * 8) )
+        print(half_width)
+        center_image = beam_image[centery-half_width:centery+half_width,centerx-half_width:centerx+half_width]
+        print(center_image.shape)
+        center_value = np.mean(center_image)
+        print(f"Mean {center_value}")
         bin_sqaured = 16 # Should be 16 because bin set to 4
         exposure_time = 1 # Maybe set exposure time to 1 seconds for this methos
-        counts_per_electron = serialem.ReportCountScaling # Get from ReportCountScaling
+        counts_per_electron = serialem.ReportCountScaling()[1] # Get from ReportCountScaling
         self.state.dose_rate_e_per_pix_s = center_value / bin_sqaured / exposure_time / counts_per_electron
 
         print(f"Fringe free defocus over vacuum is {self.state.fringe_free_focus_vacuum} um")

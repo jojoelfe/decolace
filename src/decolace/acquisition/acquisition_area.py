@@ -9,6 +9,7 @@ from sklearn.linear_model import HuberRegressor
 from timeit import default_timer as timer
 from pydantic import BaseModel
 from typing import Optional
+from .serialem_helper import connect_sem
 
 from shapely import Polygon, affinity
 from contrasttransferfunction import CtfFit
@@ -106,7 +107,7 @@ class AcquisitionAreaSingleState(BaseModel):
 class AcquisitionAreaSingle:
     state: AcquisitionAreaSingleState = AcquisitionAreaSingleState()
 
-    def __init__(self, name, directory, beam_radius=100, defocus=-1.0, tilt=0.0):
+    def __init__(self, name, directory, defocus=-1.0, tilt=0.0):
         self.name = name
         self.directory = directory
         Path(directory).mkdir(parents=True, exist_ok=True)
@@ -132,6 +133,7 @@ class AcquisitionAreaSingle:
     def initialize_from_napari(
         self, map_navigator_id: int, center_coordinate, corner_coordinates
     ):
+        serialem = connect_sem()
         serialem.LoadOtherMap(map_navigator_id, "A")
 
         center_item = int(
@@ -172,12 +174,12 @@ class AcquisitionAreaSingle:
         )
         self.state.corner_positions_image = np.array(corner_coordinates)
 
-    def calculate_acquisition_positions_from_napari(self, add_overlap=0.05):
+    def calculate_acquisition_positions_from_napari(self, beam_radius, add_overlap=0.05):
 
-        polygon = Polygon(self.state["corner_positions_specimen"])
+        polygon = Polygon(self.state.corner_positions_specimen)
 
         center = _hexagonal_cover(
-            polygon, self.state["beam_radius"] * (1 - add_overlap)
+            polygon, beam_radius * (1 - add_overlap)
         )
 
         self.state.acquisition_positions = center
@@ -205,9 +207,8 @@ class AcquisitionAreaSingle:
         initial_beamshift=None,
         progress_callback=None,
     ):
+        serialem = connect_sem()
         last_bs_correction=0.0
-        last_defocus_correction=0.0
-        cycle_defocus = False
         if self.state.acquisition_positions is None or self.state.positions_acquired is None:
             raise ValueError("No acquisition positions defined")
         for index in range(len(self.state.acquisition_positions)):
@@ -225,7 +226,7 @@ class AcquisitionAreaSingle:
             report["position"] = index
             current_speciment_shift = np.array(serialem.ReportSpecimenShift())
             diff = (
-                np.array(self.state["acquisition_positions"][index])
+                np.array(self.state.acquisition_positions[index])
                 - current_speciment_shift
             )
             serialem.ImageShiftByMicrons(diff[0], diff[1])
@@ -233,7 +234,7 @@ class AcquisitionAreaSingle:
            
             if self.state.beamshift_correction:
                 beam_shift_prediction = self.predict_beamshift(
-                    self.state["acquisition_positions"][index]
+                    self.state.acquisition_positions[index]
                 )
                 if beam_shift_prediction is not None:
                     report["using_beamshift_prediction"] = True
@@ -305,6 +306,7 @@ class AcquisitionAreaSingle:
                 if progress_callback is not None:
                     progress_callback(report=report, acquisition_area=self)
                 serialem.ChangeFocus(self.state.ctf_step_when_unreliable)
+                continue
 
             # Set desired defocus
             if self.state.cycle_defocus:
@@ -329,6 +331,7 @@ class AcquisitionAreaSingle:
                 progress_callback(report=report, acquisition_area=self)
            
     def move_to_position(self):
+        serialem = connect_sem()
         if self.state.navigator_center_index is not None:
             serialem.RealignToOtherItem(
                 int(self.state.navigator_center_index), 0, 0, 0.05, 4, 1
@@ -342,6 +345,7 @@ class AcquisitionAreaSingle:
                 raise ValueError("No navigator position set")
 
     def move_to_position_if_needed(self):
+        serialem = connect_sem()
         if self.state.navigator_center_index is not None:
             wanted_stage_position = serialem.ReportOtherItem(
                 int(self.state.navigator_center_index)
