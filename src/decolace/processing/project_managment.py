@@ -106,3 +106,18 @@ class ProcessingProject(BaseModel):
                 for mtr in match_template_runs.to_dict("records")
             ]
         return cls(**project_info, acquisition_areas=acquisition_areas, match_template_runs=match_template_runs)
+
+def process_experimental_conditions(acquisition_areas: List[AcquisitionAreaPreProcessing]):
+    from collections import defaultdict
+    experimental_conditions_column = [aa.experimental_condition for aa in acquisition_areas]
+    unique_conditions = defaultdict(dict)
+    for i, ec_line in enumerate(experimental_conditions_column):
+        if ":" not in ec_line:
+            continue
+        for ec in ec_line.split(";"):
+            split = ec.split(":")
+            if len(split) != 2:
+                continue
+            key, value = split
+            unique_conditions[key][i] = value
+    return unique_conditions
