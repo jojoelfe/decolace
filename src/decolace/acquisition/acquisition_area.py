@@ -67,6 +67,52 @@ def _hexagonal_cover(polygon, radius):
 
     return np.array(centers)
 
+def rectangular_cover(polygon, radius):
+    
+    # Define a regular hexagon with side length equal to the sphere radius
+    sqaure = Polygon(
+        [
+            (-radius,radius),
+            {-radius,-radius},
+            (radius,-radius),
+            (radius,radius),
+            (-radius,radius)
+        ]
+    )
+
+    # Compute the bounding box of the polygon
+    minx, miny, maxx, maxy = polygon.bounds
+
+    # Compute the offset required to center the hexagonal grid within the bounding box
+    dx = sqaure.bounds[2] - square.bounds[0]
+    dy = sqaure.bounds[3] - sqaure.bounds[1]
+    offsetx = (maxx - minx - dx) / 2
+    offsety = (maxy - miny - dy) / 2
+
+    # Compute the number of hexagons required in each direction
+    nx = int(np.ceil((maxx - minx - dx / 2) / (2 * radius))) + 1
+    ny = int(np.ceil((maxy - miny - dy / 2) / (2 * radius))) + 1
+
+    # Create an empty list to store the center points of the hexagons
+    centers = []
+
+    # Loop over each hexagon in the grid and test if it intersects the input polygon
+    for j in range(-ny, ny):
+        y = miny + offsety + (j * radius * 2)
+        direction = int(((j % 2) - 0.5) * 2)
+        for i in range(-nx*direction, nx*direction, direction):
+            x = (
+                minx
+                + offsetx
+                + (i * 2 * radius)
+                + (j % 2) * radius
+            )
+            if polygon.intersects(affinity.translate(sqaure, xoff=x, yoff=y)):
+                centers.append((x, y))
+
+    return np.array(centers)
+
+
 class AcquisitionAreaSingleState(BaseModel):
     desired_defocus: float = -1.0
     cycle_defocus: bool = False

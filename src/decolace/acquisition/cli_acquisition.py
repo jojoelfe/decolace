@@ -372,7 +372,7 @@ def setup_areas(
     viewer = napari.view_image(np.array(maps))
     
     @magicgui(shapes={'label': 'Setup areas'})
-    def my_widget(shapes: Shapes):
+    def my_widget(shapes: Shapes, use_rectangular_grid: bool = False):
         points = []
         areas = shapes.data
         for area in areas:
