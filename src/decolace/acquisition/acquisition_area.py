@@ -70,10 +70,10 @@ def _hexagonal_cover(polygon, radius):
 def rectangular_cover(polygon, radius):
     
     # Define a regular hexagon with side length equal to the sphere radius
-    sqaure = Polygon(
+    square = Polygon(
         [
             (-radius,radius),
-            {-radius,-radius},
+            (-radius,-radius),
             (radius,-radius),
             (radius,radius),
             (-radius,radius)
@@ -84,8 +84,8 @@ def rectangular_cover(polygon, radius):
     minx, miny, maxx, maxy = polygon.bounds
 
     # Compute the offset required to center the hexagonal grid within the bounding box
-    dx = sqaure.bounds[2] - square.bounds[0]
-    dy = sqaure.bounds[3] - sqaure.bounds[1]
+    dx = square.bounds[2] - square.bounds[0]
+    dy = square.bounds[3] - square.bounds[1]
     offsetx = (maxx - minx - dx) / 2
     offsety = (maxy - miny - dy) / 2
 
@@ -105,9 +105,9 @@ def rectangular_cover(polygon, radius):
                 minx
                 + offsetx
                 + (i * 2 * radius)
-                + (j % 2) * radius
+                
             )
-            if polygon.intersects(affinity.translate(sqaure, xoff=x, yoff=y)):
+            if polygon.intersects(affinity.translate(square, xoff=x, yoff=y)):
                 centers.append((x, y))
 
     return np.array(centers)
@@ -177,7 +177,7 @@ class AcquisitionAreaSingle:
 
      
     def initialize_from_napari(
-        self, map_navigator_id: int, center_coordinate, corner_coordinates
+        self, map_navigator_id: int, center_coordinate, corner_coordinates, affine= None
     ):
         serialem = connect_sem()
         serialem.LoadOtherMap(map_navigator_id, "A")
@@ -220,13 +220,19 @@ class AcquisitionAreaSingle:
         )
         self.state.corner_positions_image = np.array(corner_coordinates)
 
-    def calculate_acquisition_positions_from_napari(self, beam_radius, add_overlap=0.05):
+    def calculate_acquisition_positions_from_napari(self, beam_radius, add_overlap=0.05,  use_square_beam=False):
 
         polygon = Polygon(self.state.corner_positions_specimen)
 
-        center = _hexagonal_cover(
-            polygon, beam_radius * (1 - add_overlap)
-        )
+        
+        if use_square_beam:
+            center = rectangular_cover(
+                polygon, beam_radius * (1 - add_overlap)
+            )
+        else:
+            center = _hexagonal_cover(
+                polygon, beam_radius * (1 - add_overlap)
+            )
 
         self.state.acquisition_positions = center
         self.state.positions_acquired = np.zeros(

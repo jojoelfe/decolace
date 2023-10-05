@@ -12,7 +12,7 @@ from rich import print
 from .grid import grid
 
 class SessionState(BaseModel):
-    grids: List[grid] = []
+    grids: List[List] = []
     microscope_settings: dict = {}
     active_grid: Optional[int] = None
     beam_radius: Optional[float] = None
@@ -50,6 +50,7 @@ class session:
         most_recent = sorted(potential_files)[-1]
         #print(f"Loading file {most_recent}")
         self.state = np.load(most_recent, allow_pickle=True).item()
+        #self.state = SessionState(**self.state)
         for grid_info in self.state.grids:
             if not Path(grid_info[1]).exists():
                 grid_info[1] = Path(self.directory) / Path(grid_info[1]).parts[-1]

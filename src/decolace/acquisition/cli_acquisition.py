@@ -369,10 +369,20 @@ def setup_areas(
     import napari
     from napari.layers import Shapes
     from magicgui import magicgui
+    
     viewer = napari.view_image(np.array(maps))
+
+    # Now test if there are already areas set up
+    existing_acquisiton_positions = False
+    if len(session_o.active_grid.state.acquisition_areas) > 0:
+        if sum([len(aa.state.acquisition_positions) for aa in session_o.active_grid.acquisition_areas]) > 0:
+            existing_acquisiton_positions = True
+    
+    if existing_acquisiton_positions:
+        affine = session_o.active_grid.draw_acquisition_positions_into_napari(viewer, map_navids, session_o.state.beam_radius)
     
     @magicgui(shapes={'label': 'Setup areas'})
-    def my_widget(shapes: Shapes, use_rectangular_grid: bool = False):
+    def my_widget(shapes: Shapes, use_square_beam: bool = False):
         points = []
         areas = shapes.data
         for area in areas:
@@ -382,14 +392,14 @@ def setup_areas(
             name = f"area{len(session_o.active_grid.state.acquisition_areas)+2}"
             polygon = shapely.geometry.Polygon(area[:,1:3])
             aa = AcquisitionAreaSingle(name,Path(session_o.active_grid.directory,name).as_posix(),tilt=session_o.active_grid.state.tilt)   
-            aa.initialize_from_napari(map_navids[int(map_id)], [polygon.centroid.y, polygon.centroid.x], area[:,1:3])
-            aa.calculate_acquisition_positions_from_napari(beam_radius=session_o.state.beam_radius)
+            aa.initialize_from_napari(map_navids[int(map_id)], [polygon.centroid.y, polygon.centroid.x], area[:,1:3],affine=affine)
+            aa.calculate_acquisition_positions_from_napari(beam_radius=session_o.state.beam_radius, use_square_beam=use_square_beam)
             aa.write_to_disk()
             session_o.active_grid.state.acquisition_areas.append([aa.name,aa.directory])
+            session_o.active_grid.acquisition_areas.append(aa)
         session_o.active_grid.write_to_disk()
         session_o.active_grid.save_navigator()
-             
-        
+        session_o.active_grid.draw_acquisition_positions_into_napari(viewer, map_navids, session_o.state.beam_radius,use_square_beam=use_square_beam)
         
     viewer.window.add_dock_widget(my_widget)
     napari.run()

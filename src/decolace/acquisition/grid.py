@@ -13,7 +13,7 @@ import numpy as np
 from .acquisition_area import AcquisitionAreaSingle
 
 class GridState(BaseModel):
-    acquisition_areas: List[str] = []
+    acquisition_areas: List[List] = []
     desired_defocus: float = -1.0
     tilt: float = 0.0
     view_file: Optional[str] = None
@@ -58,6 +58,7 @@ class grid:
             raise (FileNotFoundError("Couldn't find saved files"))
         most_recent = sorted(potential_files)[-1]
         self.state = np.load(most_recent, allow_pickle=True).item()
+        #self.state = GridState(**self.state)
         self.acquisition_areas = []
         for area in self.state.acquisition_areas:
             self.acquisition_areas.append(AcquisitionAreaSingle(area[0], Path(self.directory) / area[0]))
@@ -172,3 +173,48 @@ class grid:
             aa.acquire(initial_defocus=initial_defocus, progress_callback=callback,initial_beamshift=initial_beamshift)
             aa.write_to_disk()
         serialem.SetColumnOrGunValve(0)
+
+    def draw_acquisition_positions_into_napari(self, viewer, map_navids, beam_radius, use_square_beam=False):
+        from skimage.transform import AffineTransform
+        write_to_disktext = {
+                'string': '{order}',
+                'size': 10,
+                'color': 'white',
+                'translation': np.array([0, 0]),
+             }
+        order = [[] for a in map_navids]
+        positions = [[] for a in map_navids]
+        corner_positions = []
+        for i, aa in enumerate(self.acquisition_areas):
+            
+            map_index = map_navids.index(aa.state.navigator_map_index)
+
+            # Get the affine matrix converting aa.state.corner_positions_specimen into aa.state.corner_positions_image
+            affine = AffineTransform()
+            affine.estimate(aa.state.corner_positions_specimen, aa.state.corner_positions_image)
+
+
+            pos = affine(aa.state.acquisition_positions[:, ::1])
+            # Concatenat i to pos along axis 1
+            pos = np.concatenate((np.ones((len(pos), 1)) * map_index, pos), axis=1)
+            # Find position of aa.navigator_map_index in nav_ids
+            
+            positions[map_index].extend(pos)
+            order[map_index].extend(np.array(range(len(aa.state.acquisition_positions))))
+        pos = np.concatenate(positions, axis = 0)
+        order = np.concatenate(order, axis = 0)
+        
+        if use_square_beam:
+            symbol='square'
+        else:
+            symbol='o'
+        viewer.add_points(
+            pos,
+            name="exposures",
+            symbol=symbol,
+            size=beam_radius * 2 * affine.scale[0],
+            face_color="#00000000",
+            features={"order":np.array(order)},
+            text=write_to_disktext
+        )
+        return affine
