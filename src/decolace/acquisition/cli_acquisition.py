@@ -26,7 +26,23 @@ class GracefulKiller:
     print("Recieved SIGTERM")
     self.kill_now = True
 
+class PauseProgress:
+    def __init__(self, progress: Progress) -> None:
+        self._progress = progress
 
+    def _clear_line(self) -> None:
+        UP = "\x1b[1A"
+        CLEAR = "\x1b[2K"
+        for _ in self._progress.tasks:
+            print(UP + CLEAR + UP)
+
+    def __enter__(self):
+        self._progress.stop()
+        self._clear_line()
+        return self._progress
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        self._progress.start()
 
 app = typer.Typer()
 
@@ -382,7 +398,7 @@ def setup_areas(
         affine = session_o.active_grid.draw_acquisition_positions_into_napari(viewer, map_navids, session_o.state.beam_radius)
     
     @magicgui(shapes={'label': 'Setup areas'})
-    def my_widget(shapes: Shapes, use_square_beam: bool = False):
+    def my_widget(shapes: Shapes, use_square_beam: bool = False, start_from_bottom: bool = False):
         points = []
         areas = shapes.data
         for area in areas:
@@ -392,8 +408,8 @@ def setup_areas(
             name = f"area{len(session_o.active_grid.state.acquisition_areas)+2}"
             polygon = shapely.geometry.Polygon(area[:,1:3])
             aa = AcquisitionAreaSingle(name,Path(session_o.active_grid.directory,name).as_posix(),tilt=session_o.active_grid.state.tilt)   
-            aa.initialize_from_napari(map_navids[int(map_id)], [polygon.centroid.y, polygon.centroid.x], area[:,1:3],affine=affine)
-            aa.calculate_acquisition_positions_from_napari(beam_radius=session_o.state.beam_radius, use_square_beam=use_square_beam)
+            aa.initialize_from_napari(map_navids[int(map_id)], [polygon.centroid.y, polygon.centroid.x], area[:,1:3])
+            aa.calculate_acquisition_positions_from_napari(beam_radius=session_o.state.beam_radius, use_square_beam=use_square_beam, start_from_bottom=start_from_bottom)
             aa.write_to_disk()
             session_o.active_grid.state.acquisition_areas.append([aa.name,aa.directory])
             session_o.active_grid.acquisition_areas.append(aa)
@@ -406,7 +422,18 @@ def setup_areas(
     print("Done")
     typer.Exit()
 
+numbad = 0
 
+@app.command()
+def performance():
+    serialem = connect_sem()
+    import time
+    for i in range(1200):
+        t1 = time.perf_counter(), time.process_time()
+        serialem.ReportBinning("R")
+        t2 = time.perf_counter(), time.process_time()
+        if i in [0,1,2,10,11,12,100,101,102,1000,1001,1002,9997,9998,9999]:
+            print(f"Iteration {i}: {t2[0] - t1[0]:.4f} s")
 
 @app.command()
 def acquire(
@@ -415,6 +442,7 @@ def acquire(
     stepwise: bool = typer.Option(False, help="Acquire stepwise"),
     defocus_offset: float = typer.Option(6.0)
 ):
+    from rich.prompt import Confirm
     killer = GracefulKiller()
     session_o = load_session(session_name, directory)
     session_o.active_grid.state.stepwise = stepwise
@@ -424,78 +452,88 @@ def acquire(
             for aa in session_o.active_grid.acquisition_areas
         ]
     )
-
-    progress = Progress(auto_refresh=False)
-    grid_task = progress.add_task("grid", total=total_shots)
-    aa_task = progress.add_task("area")
-
-    progress.console.print(
-        Panel(
-            "[bold blue]Starting acquisition of grid {session_o.active_grid.name}.",
-            padding=1,
-        )
+    alreaddy_acquired = sum(
+        [
+            aa.state.positions_acquired.sum()
+            for aa in  session_o.active_grid.acquisition_areas
+        ]
     )
 
-    def progress_callback(grid, report, acquisition_area, type=None):
-        if type == "start_new_area":
-            progress.log(
-                f"Starting acquisition of area {acquisition_area.name} in grid {grid.name}"
+    with Progress(auto_refresh=False) as progress:
+        grid_task = progress.add_task("grid", total=total_shots, completed=alreaddy_acquired)
+
+        progress.console.print(
+            Panel(
+                "[bold blue]Starting acquisition of grid {session_o.active_grid.name}.",
+                padding=1,
             )
-            progress.reset(
-                aa_task,
-                total=len(acquisition_area.state.acquisition_positions),
-                description=f"{acquisition_area.name}",
-            )
-            progress.start_task(aa_task)
-        elif type == "resume_area":
-            progress.log(
-                f"Resuming acquisition of area {acquisition_area.name} in grid {grid.name}"
-            )
-        if report is not None:
-            progress.update(aa_task, advance=1)
-            progress.update(grid_task, advance=1)
-            log_string = f"{report['position']}/{len(acquisition_area.state.acquisition_positions)} "
-            if "using_focus_prediction" in report:
-                log_string += "FP :green_heart: "
-            else:
-                log_string += "FP :x: "
-            if "using_beamshift_prediction" in report:
-                log_string += "BSP :green_heart: "
-            else:
-                log_string += "BSP :x: "
-            if "fasttracked" in report:
-                log_string += "FT :green_heart: "
-            else:
-                log_string += "FT :x: "
+        )
+        progress.start_task(grid_task)
+        
+        def progress_callback(grid, report, acquisition_area, type=None):
+            global numbad
+            if type == "start_new_area":
+                progress.console.log(
+                    f"Starting acquisition of area {acquisition_area.name} in grid {grid.name}"
+                )
+                
+            elif type == "resume_area":
+                progress.console.log(
+                    f"Resuming acquisition of area {acquisition_area.name} in grid {grid.name}"
+                )
+            if report is not None:
+                progress.update(grid_task, advance=1,refresh=True)
+                numbad += 1
+                log_string = f"{report['position']}/{len(acquisition_area.state.acquisition_positions)} "
+                if "using_focus_prediction" in report:
+                    log_string += "FP :green_heart: "
+                else:
+                    log_string += "FP :x: "
+                if "using_beamshift_prediction" in report:
+                    log_string += "BSP :green_heart: "
+                else:
+                    log_string += "BSP :x: "
+                if "fasttracked" in report:
+                    log_string += "FT :green_heart: "
+                else:
+                    log_string += "FT :x: "
 
-            log_string += f"Counts {report['counts']:.1f} "
+                log_string += f"Counts {report['counts']:.1f} "
 
-            if "beamshift_correction" in report:
-                log_string += f"BSC: {report['beamshift_correction']:.4f}um "
+                if "beamshift_correction" in report:
+                    log_string += f"BSC: {report['beamshift_correction']:.4f}um "
 
-            if "measured_defocus" in report:
-                log_string += f"MF: {report['measured_defocus']:.2f}um {report['ctf_cc']:.3f}CC {report['ctf_res']:.2f}A "
+                if "measured_defocus" in report:
+                    log_string += f"MF: {report['measured_defocus']:.2f}um {report['ctf_cc']:.3f}CC {report['ctf_res']:.2f}A "
 
-            if "defocus_adjusted_by" in report:
-                log_string += f"DA: {report['defocus_adjusted_by']:.3f}um"
+                if "defocus_adjusted_by" in report:
+                    numbad = 0
+                    log_string += f"DA: {report['defocus_adjusted_by']:.3f}um"
+                if "perf" in report:
+                    log_string += report["perf"]
+                if numbad > 0:
+                    log_string += f" {numbad} failed corrections"
 
-            progress.log(log_string)
-            if killer.kill_now:
-                grid.state.stepwise = True
-            if grid.state.stepwise:
-                cont = typer.confirm("Continue?")
-                if not cont:
-                    save = typer.confirm("Save?")
-                    if save:
-                        acquisition_area.write_to_disk()
-                    continous = typer.confirm("Continous:")
-                    if continous:
-                        grid.state.stepwise = False
-                    else:
-                        print("Aborting!")
-                        raise typer.Abort()
+                progress.console.log(log_string)
+                if killer.kill_now or numbad > 20:
+                    grid.state.stepwise = True
+                if grid.state.stepwise:
+                    with PauseProgress(progress):
+                        cont = Confirm.ask("Continue?")
+                    if not cont:
+                        with PauseProgress(progress):
+                            save = Confirm.ask("Save?")
+                        if save:
+                            acquisition_area.write_to_disk()
+                        with PauseProgress(progress):
+                            continous = Confirm.ask("Continous:")
+                        if continous:
+                            grid.state.stepwise = False
+                        else:
+                            print("Aborting!")
+                            raise typer.Abort()
 
-    session_o.active_grid.start_acquisition(initial_defocus=session_o.state.fringe_free_focus_cross_grating-defocus_offset,progress_callback=progress_callback)
+        session_o.active_grid.start_acquisition(initial_defocus=session_o.state.fringe_free_focus_cross_grating-defocus_offset,progress_callback=progress_callback)
 
 @app.callback()
 def main(

@@ -15,7 +15,7 @@ from shapely import Polygon, affinity
 from contrasttransferfunction import CtfFit
 
 
-def _hexagonal_cover(polygon, radius):
+def _hexagonal_cover(polygon, radius, y_direction=1):
     """
     Compute hexagonal grid covering the input polygon using spheres of the given radius.
 
@@ -53,6 +53,7 @@ def _hexagonal_cover(polygon, radius):
 
     # Loop over each hexagon in the grid and test if it intersects the input polygon
     for j in range(-ny, ny):
+        j *= y_direction
         y = miny + offsety + (j * radius * 3 / 2)
         direction = int(((j % 2) - 0.5) * 2)
         for i in range(-nx*direction, nx*direction, direction):
@@ -151,11 +152,12 @@ class AcquisitionAreaSingleState(BaseModel):
         arbitrary_types_allowed = True
 
 class AcquisitionAreaSingle:
-    state: AcquisitionAreaSingleState = AcquisitionAreaSingleState()
+    
 
     def __init__(self, name, directory, defocus=-1.0, tilt=0.0):
         self.name = name
         self.directory = directory
+        self.state:AcquisitionAreaSingleState = AcquisitionAreaSingleState()
         Path(directory).mkdir(parents=True, exist_ok=True)
         self.frames_directory = os.path.join(directory, "frames")
         Path(self.frames_directory).mkdir(parents=True, exist_ok=True)
@@ -220,7 +222,7 @@ class AcquisitionAreaSingle:
         )
         self.state.corner_positions_image = np.array(corner_coordinates)
 
-    def calculate_acquisition_positions_from_napari(self, beam_radius, add_overlap=0.05,  use_square_beam=False):
+    def calculate_acquisition_positions_from_napari(self, beam_radius, add_overlap=0.05,  use_square_beam=False, start_from_bottom=False):
 
         polygon = Polygon(self.state.corner_positions_specimen)
 
@@ -230,8 +232,11 @@ class AcquisitionAreaSingle:
                 polygon, beam_radius * (1 - add_overlap)
             )
         else:
+            direction=1
+            if start_from_bottom:
+                direction=-1
             center = _hexagonal_cover(
-                polygon, beam_radius * (1 - add_overlap)
+                polygon, beam_radius * (1 - add_overlap), y_direction=direction
             )
 
         self.state.acquisition_positions = center
@@ -239,10 +244,10 @@ class AcquisitionAreaSingle:
             (self.state.acquisition_positions.shape[0]), dtype="bool"
         )
 
-    def predict_beamshift(self, specimen_coordinates):
+    def predict_beamshift(self, specimen_coordinates, selection=-100):
         if self.state.beamshift_calibration_measurements is None:
             return None
-        data = np.array(self.state.beamshift_calibration_measurements[-100:])
+        data = np.array(self.state.beamshift_calibration_measurements[selection:])
         if len(data) < self.state.beamshift_calibrations_required:
             return None
         reg_x = HuberRegressor().fit(data[:, [0, 1]], data[:, 3])
@@ -261,6 +266,7 @@ class AcquisitionAreaSingle:
     ):
         serialem = connect_sem()
         last_bs_correction=0.0
+        num_bad_predictions = 0
         if self.state.acquisition_positions is None or self.state.positions_acquired is None:
             raise ValueError("No acquisition positions defined")
         for index in range(len(self.state.acquisition_positions)):
@@ -332,6 +338,13 @@ class AcquisitionAreaSingle:
                             beam_shift_after_centering[1],
                         ]
                     )
+                    num_bad_predictions = 0
+                else:
+                    if 'using_beamshift_prediction' in report and report['using_beamshift_prediction']:
+                        num_bad_predictions += 1
+                if num_bad_predictions > 3:
+                    self.state.beamshift_calibration_measurements = []
+
 
             if counts < self.state.count_threshold_for_ctf:
                 if progress_callback is not None:

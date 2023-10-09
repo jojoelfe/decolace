@@ -124,6 +124,7 @@ class grid:
 
     def take_map(self):
         serialem = connect_sem()
+        serialem.SetDefocus(-10)
         serialem.View()
         self.ensure_view_file_is_open()
         serialem.Save()
@@ -136,7 +137,11 @@ class grid:
 
     def start_acquisition(self, initial_defocus, progress_callback=None):
         serialem = connect_sem()
+        
+        
         for index, aa in enumerate(self.acquisition_areas):
+            serialem.CloseLogOpenNew(1)
+            #serialem.Exit(1)
             if np.sum(aa.state.positions_acquired) == len(
                 aa.state.positions_acquired
             ):
@@ -160,7 +165,7 @@ class grid:
             serialem.GoToLowDoseArea("R")
             initial_beamshift = None
             if index > 0:
-                initial_beamshift = self.acquisition_areas[index-1].predict_beamshift(aa.state.acquisition_positions[0])
+                initial_beamshift = self.acquisition_areas[index-1].predict_beamshift(aa.state.acquisition_positions[0],selection=0)
 
 
             serialem.ManageDewarsAndPumps(-1)
@@ -201,8 +206,8 @@ class grid:
             
             positions[map_index].extend(pos)
             order[map_index].extend(np.array(range(len(aa.state.acquisition_positions))))
-        pos = np.concatenate(positions, axis = 0)
-        order = np.concatenate(order, axis = 0)
+        pos = np.concatenate([a for a in positions if len(a) > 0], axis = 0)
+        order = np.concatenate([a for a in order if len(a) > 0], axis = 0)
         
         if use_square_beam:
             symbol='square'

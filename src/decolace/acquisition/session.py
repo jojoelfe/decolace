@@ -150,15 +150,8 @@ class session:
             minimal_slope = np.diff(ra).min()
             return minimal_slope
 
-        from scipy.optimize import minimize_scalar
-
-        res = minimize_scalar(calculate_fringe_free_score, 
-                              bounds=(self.state.fringe_free_focus_vacuum-5.0, self.state.fringe_free_focus_vacuum+5.0), 
-                              method='bounded',
-                              options={"maxiter":10,"disp":True})
-        self.state.fringe_free_focus_cross_grating = res.x
-        serialem.SetDefocus(res.x)
-        serialem.Record()
+        for i in np.arange(-5.0,5.0,0.5):
+            print(calculate_fringe_free_score(self.state.fringe_free_focus_vacuum + i))
 
     def prepare_beam_vacuum(self, coverage=0.9):
         serialem = connect_sem()
@@ -223,6 +216,10 @@ class session:
 
         res = minimize_scalar(calculate_fringe_free_score, 
                               bounds=(self.state.min_defocus_for_ffsearch, self.state.max_defocus_for_ffsearch), 
+                              method='bounded',
+                              options={"maxiter":10,"disp":True})
+        res = minimize_scalar(calculate_fringe_free_score, 
+                              bounds=(res.x-10.0, res.x+10.0), 
                               method='bounded',
                               options={"maxiter":10,"disp":True})
         self.state.fringe_free_focus_vacuum = res.x
