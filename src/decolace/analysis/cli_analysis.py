@@ -51,11 +51,6 @@ def cluster_by_distance_and_orientation(
     import starfile
     import numpy as np
     from scipy.spatial import KDTree
-    from scipy.sparse.csgraph import connected_components
-    from healpy import pix2ang
-    from collections import defaultdict
-    from sympy import Plane, Point3D
-    from decolace.analysis.orientations import calculate_angle_between_vectors
     import eulerangles
 
     input_dir = Path(ctx.obj.project.project_path) / "Matches"
@@ -77,41 +72,35 @@ def cluster_by_distance_and_orientation(
         pairs = tree.query_pairs(r=distance_threshold, output_type='ndarray')
 
 
-        data['NUMCLUSTERS'] = 0
+        data['CLUSTER_SCORE'] = 0
         print(f"Distance {distance_threshold} has {len(pairs)} pairs")
         # Get all pairs that ar aligned correctly
-        vectors1 = np.dot(rotation_matrices[pairs[:,0]], np.array([1,0,0]))
-        vectors2 = np.dot(rotation_matrices[pairs[:,1]], np.array([1,0,0]))
-        dotproducts = np.sum(vectors1 * vectors2, axis=1) 
+        vectors = np.dot(rotation_matrices, np.array([0,0,1]))
+        #vectors1 = np.dot(rotation_matrices[pairs[:,0]], np.array([1,0,0]))
+        #vectors2 = np.dot(rotation_matrices[pairs[:,1]], np.array([1,0,0]))
+        dotproducts = np.sum(vectors[pairs[:,0]] * vectors[pairs[:,1]], axis=1) 
         angles = np.degrees(np.arccos(dotproducts)) # No normalization needed as long as rotated vector is a unit vector
-        potential_clusers = pairs[angles < orientation_threshold]
-        potential_clusters_midpoints = (coordinates[potential_clusers[:,0]] + coordinates[potential_clusers[:,1]]) / 2
-        potential_additional_candidates = tree.query_ball_point(potential_clusters_midpoints,r=distance_threshold)
-        return
-        for pair in pairs: 
-            rotation, uv1, uv2 = calculate_angle_between_vectors(euler_angles[pair[0]], euler_angles[pair[1]],[1,0,0])
-            
-            if rotation < orientation_threshold:
-                average_v = (uv1 + uv2) / np.linalg.norm(uv1 + uv2)
-                plane = Plane(Point3D((coordinates[pair[0]]+coordinates[pair[1]])/2), normal_vector=average_v)
-                potential_clusers.append((pair[0],pair[1],plane))
+        potential_clusters = pairs[angles < orientation_threshold]
+        print(f"There are {len(potential_clusters)} pairs with aligned orientation")
+        potential_clusters_midpoints = (coordinates[potential_clusters[:,0]] + coordinates[potential_clusters[:,1]]) / 2
+        potential_clusters_normal = vectors[potential_clusters[:,0]] + vectors[potential_clusters[:,1]]
+        potential_clusters_normal /= np.linalg.norm(potential_clusters_normal, axis=1)[:,None]
+        potential_additional_candidates = tree.query_ball_point(potential_clusters_midpoints,r=distance_threshold*2)
         
-        for i,potential_cluster in enumerate(potential_clusers):
-            pair_1, pair_2, plane = potential_cluster
-            res = tree.query_ball_point(plane.p1,r=distance_threshold)
-            add_points = []
-            for potential_additional_candidate in res:
-                if potential_additional_candidate in [pair_1, pair_2]:
-                    continue
-                if plane.distance(Point3D(coordinates[potential_additional_candidate])).evalf() < 400 and ( calculate_angle_between_vectors(euler_angles[pair_1], euler_angles[potential_additional_candidate],[1,0,0])[0] < orientation_threshold or calculate_angle_between_vectors(euler_angles[pair_2], euler_angles[potential_additional_candidate],[1,0,0])[0] < orientation_threshold ):
-                    add_points.append(potential_additional_candidate)
-            print(f"For pc {i} there are {len(add_points)} additional candidates")
-           
-            if len(add_points) > 1:
-                data.loc[pair_1,'NUMCLUSTERS'] +=  1
-                data.loc[pair_2,'NUMCLUSTERS'] +=  1
-                for add_point in add_points:
-                    data.loc[add_point, 'NUMCLUSTERS'] += 1
+        valid = 0
+        for i,potential_cluster in enumerate(potential_additional_candidates):
+            potential_cluster = np.array(potential_cluster)
+            dotproducts = np.sum(potential_clusters_normal[i] * vectors[potential_cluster], axis=1)
+            angles = np.degrees(np.arccos(dotproducts))
+            potential_cluster = potential_cluster[angles < orientation_threshold]
+            
+            distance_to_plane = np.abs(np.sum((coordinates[potential_cluster]-potential_clusters_midpoints[i]) * potential_clusters_normal[i], axis=1))
+            potential_cluster = potential_cluster[distance_to_plane < 400]
+            if len(potential_cluster) > 3:
+                
+                data.iloc[potential_cluster, data.columns.get_loc('CLUSTER_SCORE')] += len(potential_cluster)
+        print(data['CLUSTER_SCORE'].describe())
+        return
         output_path = input_dir / f"{aa.area_name}_{ctx.obj.match_template_job.run_name}_{ctx.obj.match_template_job.run_id}_filtered_numclusters.star"
         starfile.write(data, output_path, overwrite=True)
 

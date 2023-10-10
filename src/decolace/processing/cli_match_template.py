@@ -295,11 +295,20 @@ def join_matches(
             new_matches = starfile.read(filtered_matches_starfile)
             if len(new_matches) > 0:
                 matches.append(new_matches)
-    combined_matches = pd.concat(matches)
+    combined_matches = pd.concat(matches, ignore_index=True)
     combined_matches_starfile = Path(ctx.obj.project.project_path) / "Matches" / f"combined_{ctx.obj.match_template_job.run_name}_{ctx.obj.match_template_job.run_id}_{name}.star"
     if use_other_images != "":
         combined_matches_starfile = combined_matches_starfile.with_name(combined_matches_starfile.stem + f"_{use_other_images}.star")
-        combined_matches['cisTEMOriginalImageFilename'].str.replace(".mrc", f"_{use_other_images}.mrc")
+        for i, row in combined_matches.iterrows():
+            if type(row['cisTEMOriginalImageFilename']) is float:
+                continue
+            new_filename = Path(row['cisTEMOriginalImageFilename'].strip("'").replace("_auto", f"_auto_{use_other_images}"))
+            if not new_filename.exists():
+                new_filename = str(new_filename).replace(".mrc", f"_{int(str(new_filename).split('_')[-3])-1}.mrc")
+                if not Path(new_filename).exists():
+                    print(f"Ouch {new_filename} does not exist")
+                    return
+            combined_matches.iloc[i,combined_matches.columns.get_loc('cisTEMOriginalImageFilename')] = "'"+str(new_filename)+"'"
         if use_different_pixel_size is not None:
             combined_matches['cisTEMPixelSize'] = use_different_pixel_size
     starfile.write(combined_matches, combined_matches_starfile, overwrite=True)
@@ -340,3 +349,60 @@ def calculate_changes_during_refine_template(
             refined_matches.loc[j, "y_change"] = original_match["cisTEMOriginalYPosition"] - refined_match["cisTEMOriginalYPosition"]
         filtered_matches_starfile = Path(aa.cistem_project).parent / "Assets" / "TemplateMatching" / f"{aa.area_name}_{ctx.obj.match_template_job.run_id}_tm_package_filtered.star"
         starfile.write(refined_matches, filtered_matches_starfile, overwrite=True)
+
+@app.command()
+def convert_coordinates(
+    starfile_path: Path = typer.Argument(..., help="Path to starfile"),
+    cistem_project: Path = typer.Argument(..., help="Path to cistem project"),
+):
+    import starfile
+    import pandas as pd
+    import sqlite3
+    import mrcfile
+
+    data = starfile.read(starfile_path)
+
+    current_project = None
+    current_db = None
+
+    current_micrograph = None
+    current_micrograph_info = None
+    original_micrograph_info = None
+    current_micrograph_header = None
+    original_micrograph_header = None
+    for i, row in data.iterrows():
+        project = Path(row["cisTEMOriginalImageFilename"].strip("'")).parent.parent.parent
+        cc = "'"
+        project = project / (str(project.name) +'.db')
+        if project != current_project:
+            current_project = project
+            current_db = sqlite3.connect(current_project)
+        if current_micrograph != row["cisTEMOriginalImageFilename"].strip(cc):
+            current_micrograph = row["cisTEMOriginalImageFilename"].strip(cc)
+            current_micrograph_info = pd.read_sql(f'SELECT * FROM MOVIE_ALIGNMENT_LIST WHERE OUTPUT_FILE="{current_micrograph}"', current_db).iloc[-1]
+            with mrcfile.open(current_micrograph) as mrc:
+                current_micrograph_header = mrc.header
+            original_micrograph_info = pd.read_sql(f'SELECT * FROM MOVIE_ALIGNMENT_LIST WHERE ALIGNMENT_JOB_ID=1 AND MOVIE_ASSET_ID="{current_micrograph_info["MOVIE_ASSET_ID"]}"', current_db).iloc[-1]
+            with mrcfile.open(original_micrograph_info["OUTPUT_FILE"].strip(cc)) as mrc:
+                original_micrograph_header = mrc.header
+            #print(f' current: {current_micrograph_info["CROP_CENTER_X"]} {current_micrograph_info["CROP_CENTER_Y"]}')
+            #print(f' current: {current_micrograph_header["nx"]} {current_micrograph_header["ny"]}')
+        extraction_coordinate_original_x = row["cisTEMOriginalXPosition"] / 2.0 - original_micrograph_header["nx"] / 2.0
+        extraction_coordinate_original_y = row["cisTEMOriginalYPosition"] / 2.0 - original_micrograph_header["ny"] / 2.0
+        extraction_coordinate_original_unbinned_x = extraction_coordinate_original_x + original_micrograph_info["CROP_CENTER_X"]
+        extraction_coordinate_original_unbinned_y = extraction_coordinate_original_y + original_micrograph_info["CROP_CENTER_Y"]
+        extraction_coordinate_current_unbinned_x = extraction_coordinate_original_unbinned_x * 2.0
+        extraction_coordinate_current_unbinned_y = extraction_coordinate_original_unbinned_y * 2.0
+        extraction_coordinate_current_x = extraction_coordinate_current_unbinned_x - current_micrograph_info["CROP_CENTER_X"]
+        extraction_coordinate_current_y = extraction_coordinate_current_unbinned_y - current_micrograph_info["CROP_CENTER_Y"]
+        extraction_coordinate_A_x = extraction_coordinate_current_x + current_micrograph_header["nx"] / 2.0
+        extraction_coordinate_A_y = extraction_coordinate_current_y + current_micrograph_header["ny"] / 2.0
+        data.loc[i, "cisTEMOriginalXPosition"] = extraction_coordinate_A_x
+        data.loc[i, "cisTEMOriginalYPosition"] = extraction_coordinate_A_y
+        print(f' X-difference: {extraction_coordinate_A_x - row["cisTEMOriginalXPosition"]}, Y-difference: {extraction_coordinate_A_y - row["cisTEMOriginalYPosition"]}')
+        #print(f' original: {original_micrograph_info["CROP_CENTER_X"]} {original_micrograph_info["CROP_CENTER_Y"]}')
+        #print(f' original: {original_micrograph_header["nx"]} {original_micrograph_header["ny"]}')
+    output_filename = starfile_path.parent / (starfile_path.stem + "_converted.star")
+    starfile.write(data, output_filename, overwrite=True)
+            
+        

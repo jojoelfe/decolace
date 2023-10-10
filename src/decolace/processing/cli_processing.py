@@ -13,6 +13,7 @@ from decolace.processing.cli_project_managment import app as project_managment_a
 from decolace.processing.cli_preprocessing import app as preprocessing_app
 from decolace.processing.cli_montaging import app as montaging_app
 from decolace.processing.cli_match_template import app as match_template_app
+from decolace.processing.cli_single_particle import app as single_particle_app
 
 class OrderCommands(TyperGroup):
   def list_commands(self, ctx: typer.Context):
@@ -35,6 +36,10 @@ app.registered_commands += montaging_app.registered_commands
 for command in match_template_app.registered_commands:
     command.rich_help_panel="Template Matching Commands"
 app.registered_commands += match_template_app.registered_commands
+for command in single_particle_app.registered_commands:
+    command.rich_help_panel="Single Particle Commands"
+app.registered_commands += single_particle_app.registered_commands
+
 
 @app.callback()
 def main(
