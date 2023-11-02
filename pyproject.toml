@@ -36,7 +36,8 @@ dependencies = [
   "mdocfile",
   "mrcfile",
   "contrasttransferfunction",
-  "pydantic"
+  "pydantic",
+  "tsp-solver2"
 ]
 
 [project.scripts]

@@ -2,15 +2,20 @@ import glob
 import os
 import time
 from pathlib import Path, PurePath
-from pydantic import BaseModel
+from pydantic.v1 import BaseModel
 from typing import List, Optional
 from .serialem_helper import connect_sem
 import numpy as np
 from rich import print
-
+from enum import Enum
 
 from .grid import grid
 
+class ProblemPolicy(Enum):
+    CONTINUE = 'continue'
+    PAUSE = 'pause'
+    ABORT = 'abort'
+    NEXT = 'next'
 class SessionState(BaseModel):
     grids: List[List] = []
     microscope_settings: dict = {}
@@ -21,6 +26,11 @@ class SessionState(BaseModel):
     max_defocus_for_ffsearch: Optional[float] = 80
     fringe_free_focus_cross_grating: Optional[float] = None
     dose_rate_e_per_pix_s: Optional[float] = None
+    unbinned_pixel_size_A: Optional[float] = None
+    cross_euc_Z_height: Optional[float] = None
+    cross_ff_Z_height: Optional[float] = None
+    euc_to_ff_offset: Optional[float] = None
+    problem_policy: ProblemPolicy = 'next'
 
     class Config:
         arbitrary_types_allowed = True
@@ -103,9 +113,10 @@ class session:
             self.state.microscope_settings[mode] = settings
     
 
-    def prepare_beam_cross(self):
+    def prepare_beam_cross_euc(self):
         serialem = connect_sem()
-        from contrasttransferfunction.spectrumhelpers import radial_average
+        serialem.Eucentricity(3)
+        self.state.cross_euc_Z_height = serialem.ReportStageXYZ()[2]
         serialem.SetBinning("R",4)
         serialem.SetExposure("R",1)
         serialem.SetDoseFracParams("R",0,0,0)
@@ -123,35 +134,71 @@ class session:
             if center_tries > 10:
                 print(f"Error could not center beam")
                 return
-        def calculate_fringe_free_score(defocus):
-            serialem.SetDefocus(defocus)
-            serialem.Record()
-            serialem.CenterBeamFromImage(0, 1.0)
-            serialem.Record()
-            serialem.CenterBeamFromImage(0, 1.0)
-            serialem.Record()
-
-            beam_image = np.asarray(serialem.bufferImage("A"))
-            # Crop out largest possbile square from the center of slice
-            # Get the dimensions of the array
-            rows, cols = beam_image.shape
-
-            # Calculate the size of the center square
-            size = min(rows, cols)
-
-            # Calculate the starting indices for the slice
-            start_row = (rows - size) // 2
-            start_col = (cols - size) // 2
-
-            # Slice the array to get the center square
-            center = beam_image[start_row:start_row+size, start_col:start_col+size]
-            ra = radial_average(center)
             
-            minimal_slope = np.diff(ra).min()
-            return minimal_slope
+        print("Please adjust the focus until there are no beam fringes and then run prepare-beam-cross-final")
+    
+    def prepare_beam_cross_final(self):
+        from contrasttransferfunction import CtfFit
 
-        for i in np.arange(-5.0,5.0,0.5):
-            print(calculate_fringe_free_score(self.state.fringe_free_focus_vacuum + i))
+        serialem = connect_sem()
+        self.state.fringe_free_focus_cross_grating = serialem.ReportDefocus()
+        serialem.SetBinning("R",4)
+        serialem.SetExposure("R",1)
+        serialem.SetDoseFracParams("R",0,0,0)
+
+        center_tries = 0
+        adjustment = 99
+        while adjustment > 0.01 * self.state.beam_radius:
+            beam_shift_before_centering = np.array(serialem.ReportBeamShift())
+            serialem.Record()
+            serialem.CenterBeamFromImage(0, 1.0)
+            beam_shift_after_centering = np.array(serialem.ReportBeamShift())
+            adjustment = np.linalg.norm(beam_shift_before_centering-beam_shift_after_centering)
+            print(f"Adjusting by {adjustment}")
+            center_tries+=1
+            if center_tries > 10:
+                print(f"Error could not center beam")
+                return
+
+        #serialem.MoveStage(0,0, -50.0)
+        wanted_defocus = -1.0    
+        
+        serialem.Record()
+        serialem.FFT("A")
+        powerspectrum = np.asarray(serialem.bufferImage("AF"))
+        fit_result = CtfFit.fit_1d(
+            powerspectrum,
+            pixel_size_angstrom=self.state.unbinned_pixel_size_A * 4,
+            voltage_kv=300.0,
+            spherical_aberration_mm=2.7,
+            amplitude_contrast=0.07)
+        measured_defocus = fit_result.ctf.defocus1_angstroms / -10000
+        print(measured_defocus)
+        defocus_error = wanted_defocus - measured_defocus
+        num_tries=0
+        while abs(defocus_error) > 0.1 and num_tries < 10:
+            num_tries += 1
+            serialem.MoveStage(0,0,defocus_error)
+            serialem.Record()
+            serialem.FFT("A")
+            powerspectrum = np.asarray(serialem.bufferImage("AF"))
+            fit_result = CtfFit.fit_1d(
+                powerspectrum,
+                pixel_size_angstrom=self.state.unbinned_pixel_size_A * 4,
+                voltage_kv=300.0,
+                spherical_aberration_mm=2.7,
+                amplitude_contrast=0.07)
+            measured_defocus = fit_result.ctf.defocus1_angstroms / -10000
+            print(measured_defocus)
+            defocus_error = wanted_defocus - measured_defocus
+        
+        self.state.cross_ff_Z_height = serialem.ReportStageXYZ()[2]
+        self.state.euc_to_ff_offset =  self.state.cross_ff_Z_height - self.state.cross_euc_Z_height
+
+        print(f"Measured stage Z offset between eucentric and fring-free position is {self.state.euc_to_ff_offset} um")
+
+
+
 
     def prepare_beam_vacuum(self, coverage=0.9):
         serialem = connect_sem()
@@ -164,7 +211,7 @@ class session:
         s_dim = min(x_dim,y_dim)
         s_dim_um = s_dim * pixel_size * 0.001
         print(f"Pixel size is {pixel_size} at current magnification. Smallest camera dimension is {s_dim} pixels and {s_dim_um} um.")
-
+        self.state.unbinned_pixel_size_A = pixel_size * 10
         #Set binning to 4 and prevent saving of frames and alignment
         serialem.SetBinning("R",4)
         serialem.SetExposure("R",1)

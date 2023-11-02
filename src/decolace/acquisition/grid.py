@@ -3,7 +3,7 @@ import os
 import time
 from functools import partial
 from pathlib import Path
-from pydantic import BaseModel
+from pydantic.v1 import BaseModel
 from typing import List, Optional
 from .serialem_helper import connect_sem
 
@@ -138,7 +138,6 @@ class grid:
     def start_acquisition(self, initial_defocus, progress_callback=None):
         serialem = connect_sem()
         
-        
         for index, aa in enumerate(self.acquisition_areas):
             serialem.CloseLogOpenNew(1)
             #serialem.Exit(1)
@@ -185,7 +184,7 @@ class grid:
                 'string': '{order}',
                 'size': 10,
                 'color': 'white',
-                'translation': np.array([0, 0]),
+                'translation': np.array([0, 0, 0]),
              }
         order = [[] for a in map_navids]
         positions = [[] for a in map_navids]

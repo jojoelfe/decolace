@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.linear_model import HuberRegressor
 from timeit import default_timer as timer
-from pydantic import BaseModel
+from pydantic.v1 import BaseModel
 from typing import Optional
 from .serialem_helper import connect_sem
 
@@ -128,7 +128,7 @@ class AcquisitionAreaSingleState(BaseModel):
     count_threshold_for_beamshift: float = 1500
     count_threshold_for_ctf: float = 1500
 
-    ctf_cc_threshold: float = 100
+    ctf_cc_threshold: float = 70
     ctf_step_when_unreliable: float = -0.03
     ctf_max_step_initially: float = 2.0
     ctf_max_step: float = 0.5
@@ -147,6 +147,7 @@ class AcquisitionAreaSingleState(BaseModel):
 
     positions_still_to_fasttrack: int = 0
     fasttrack: bool = False
+    aborted: bool = False
 
     class Config:
         arbitrary_types_allowed = True
@@ -182,6 +183,7 @@ class AcquisitionAreaSingle:
         self, map_navigator_id: int, center_coordinate, corner_coordinates, affine= None
     ):
         serialem = connect_sem()
+        serialem.SuspendNavRedraw()
         serialem.LoadOtherMap(map_navigator_id, "A")
 
         center_item = int(
@@ -243,6 +245,21 @@ class AcquisitionAreaSingle:
         self.state.positions_acquired = np.zeros(
             (self.state.acquisition_positions.shape[0]), dtype="bool"
         )
+    
+    def optimize_path(self):
+        from tsp_solver.greedy import solve_tsp
+
+        # Create square distance matrix of self.state.acquisition_positions
+        dist_matrix = np.zeros((len(self.state.acquisition_positions), len(self.state.acquisition_positions)))
+        for i in range(len(self.state.acquisition_positions)):
+            for j in range(len(self.state.acquisition_positions)):
+                dist_matrix[i][j] = np.linalg.norm(self.state.acquisition_positions[i] - self.state.acquisition_positions[j])
+
+        # Solve TSP to find optimal path
+        path = solve_tsp(dist_matrix,endpoints=(0,len(self.state.acquisition_positions)-1))
+        self.state.acquisition_positions = self.state.acquisition_positions[path]
+
+
 
     def predict_beamshift(self, specimen_coordinates, selection=-100):
         if self.state.beamshift_calibration_measurements is None:
@@ -267,12 +284,16 @@ class AcquisitionAreaSingle:
         serialem = connect_sem()
         last_bs_correction=0.0
         num_bad_predictions = 0
+        num_max_correction = 0
+        offset_before_max_correction = 0
         if self.state.acquisition_positions is None or self.state.positions_acquired is None:
             raise ValueError("No acquisition positions defined")
         for index in range(len(self.state.acquisition_positions)):
             report = {}
             if self.state.positions_acquired[index]:
                 continue
+            if self.state.aborted:
+                return
             if index == 0:
                 if initial_beamshift is not None and self.state.beamshift_correction:
                     serialem.SetBeamShift(initial_beamshift[0], initial_beamshift[1])
@@ -281,6 +302,9 @@ class AcquisitionAreaSingle:
                 
             if index % 10 == 0:
                 self.write_to_disk()
+                if established_lock:
+                    serialem.SuppressReports()
+                    serialem.DeferLogUpdates()
             report["position"] = index
             current_speciment_shift = np.array(serialem.ReportSpecimenShift())
             diff = (
@@ -379,11 +403,24 @@ class AcquisitionAreaSingle:
                 self.state.desired_defocus = self.state.low_defocus + fraction_of_gradient * (self.state.high_defocus-self.state.low_defocus)
             offset = self.state.desired_defocus - measured_defocus
             
+            
             if abs(offset) > self.state.ctf_max_step and established_lock:
                 offset = self.state.ctf_max_step * np.sign(offset)
+                if num_max_correction == 0:
+                    offset_before_max_correction = abs(offset)
+                num_max_correction += 1
+
             else:
                 if abs(offset) > self.state.ctf_max_step_initially:
                     offset = self.state.ctf_max_step_initially * np.sign(offset)
+                    if num_max_correction == 0:
+                        offset_before_max_correction = abs(offset)
+                    num_max_correction += 1
+                else:
+                    num_max_correction = 0
+            if num_max_correction > 3 and abs(offset) > offset_before_max_correction:
+                report["potential_overfocus"] = True
+
             if abs(offset) < 0.1 and not established_lock and last_bs_correction < 0.06:
                 established_lock = True
             if abs(offset) > 0.001:

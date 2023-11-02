@@ -103,14 +103,24 @@ def prepare_beam_vacuum(
     typer.echo(f"Prepared beam vacuum for session {session_o.name}")
 
 @app.command()
-def prepare_beam_cross(
+def prepare_beam_cross_euc(
     name: str = typer.Option(None, help="Name of the session"),
     directory: str = typer.Option(None , help="Directory to save session in"),
 ):
     session_o = load_session(name, directory)
-    session_o.prepare_beam_cross()
+    session_o.prepare_beam_cross_euc()
     session_o.write_to_disk()
-    typer.echo(f"Prepared beam vacuum for session {session_o.name}")
+    typer.echo(f"Prepared beam cross 1 for session {session_o.name}")
+
+@app.command()
+def prepare_beam_cross_final(
+    name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None , help="Directory to save session in"),
+):
+    session_o = load_session(name, directory)
+    session_o.prepare_beam_cross_final()
+    session_o.write_to_disk()
+    typer.echo(f"Prepared beam cross 2 for session {session_o.name}")
 
 @app.command()
 def print_session_state(
@@ -119,6 +129,15 @@ def print_session_state(
 ): 
     session_o = load_session(name, directory)
     print(session_o.state)
+
+@app.command()
+def print_aa_state(
+    name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None , help="Directory to save session in"),
+): 
+    session_o = load_session(name, directory)
+    for aa in session_o.active_grid.acquisition_areas:
+        print(aa.state)
 
 @app.command()
 def set_session_state(
@@ -207,6 +226,84 @@ def new_map(
     session_o.write_to_disk()
     typer.echo(f"Created new map for grid {session_o.active_grid.name}")
 
+@app.command()
+def update_cc(
+    session_name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory to save session in"),
+):
+    session_o = load_session(session_name, directory)
+    session_o.state.min_defocus_for_ffsearch = -10.0
+    session_o.state.max_defocus_for_ffsearch = 10.0
+    #for aa in session_o.active_grid.acquisition_areas:
+    #    aa.state.ctf_cc_threshold = 70
+    #    aa.write_to_disk()
+    session_o.write_to_disk()
+
+@app.command()
+def optimize_path(
+    session_name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory to save session in"),
+):
+    session_o = load_session(session_name, directory)
+    
+    for aa in session_o.active_grid.acquisition_areas:
+        aa.optimize_path()
+    serialem = connect_sem()
+    num_items = serialem.ReportNumTableItems()
+    maps = []
+    map_coordinates = []
+    map_navids = []
+    for i in range(1,int(num_items)+1):
+        nav_item_info = serialem.ReportOtherItem(i)
+        nav_id = int(nav_item_info[0])
+        nav_note = serialem.GetVariable("navNote")
+        
+        if nav_note == "decolace_acquisition_map":
+            serialem.LoadOtherMap(i,"A")
+            image = np.asarray(serialem.bufferImage("A")).copy()
+            maps.append(image)
+            map_navids.append(nav_id)
+            map_coordinates.append(nav_item_info[1:3])
+    import napari
+    from napari.layers import Shapes
+    from magicgui import magicgui
+    
+    viewer = napari.view_image(np.array(maps))
+
+    # Now test if there are already areas set up
+    existing_acquisiton_positions = False
+    if len(session_o.active_grid.state.acquisition_areas) > 0:
+        if sum([len(aa.state.acquisition_positions) for aa in session_o.active_grid.acquisition_areas]) > 0:
+            existing_acquisiton_positions = True
+    
+    if existing_acquisiton_positions:
+        affine = session_o.active_grid.draw_acquisition_positions_into_napari(viewer, map_navids, session_o.state.beam_radius)
+    
+    @magicgui(shapes={'label': 'Setup areas'})
+    def my_widget(shapes: Shapes, use_square_beam: bool = False, start_from_bottom: bool = False):
+        points = []
+        areas = shapes.data
+        for area in areas:
+            map_id = area[0,0]
+            if np.sum(area[:,0] - map_id) != 0:
+                raise("Error: Map ID is not the same for all points in the polygon")
+            name = f"area{len(session_o.active_grid.state.acquisition_areas)+2}"
+            polygon = shapely.geometry.Polygon(area[:,1:3])
+            aa = AcquisitionAreaSingle(name,Path(session_o.active_grid.directory,name).as_posix(),tilt=session_o.active_grid.state.tilt)   
+            aa.initialize_from_napari(map_navids[int(map_id)], [polygon.centroid.y, polygon.centroid.x], area[:,1:3])
+            aa.calculate_acquisition_positions_from_napari(beam_radius=session_o.state.beam_radius, use_square_beam=use_square_beam, start_from_bottom=start_from_bottom)
+            aa.write_to_disk()
+            session_o.active_grid.state.acquisition_areas.append([aa.name,aa.directory])
+            session_o.active_grid.acquisition_areas.append(aa)
+        session_o.active_grid.write_to_disk()
+        session_o.active_grid.save_navigator()
+        session_o.active_grid.draw_acquisition_positions_into_napari(viewer, map_navids, session_o.state.beam_radius,use_square_beam=use_square_beam)
+        
+    viewer.window.add_dock_widget(my_widget)
+    napari.run()
+    print("Done")
+    typer.Exit()
+    
 
 @app.command()
 def add_acquisition_area():
@@ -435,14 +532,29 @@ def performance():
         if i in [0,1,2,10,11,12,100,101,102,1000,1001,1002,9997,9998,9999]:
             print(f"Iteration {i}: {t2[0] - t1[0]:.4f} s")
 
+def handle_problem(serialem, session_o: session, aa: AcquisitionAreaSingle, message: str):
+    from .session import ProblemPolicy
+    typer.echo(message)
+    if session_o.state.problem_policy == ProblemPolicy.CONTINUE:
+        return
+    elif session_o.state.problem_policy == ProblemPolicy.PAUSE:
+        session_o.active_grid.state.stepwise = True
+    elif session_o.state.problem_policy == ProblemPolicy.NEXT:
+        aa.state.aborted = True
+    else:
+        serialem.SetColumnOrGunValve(0)
+        typer.Exit()
+
+
 @app.command()
 def acquire(
     session_name: str = typer.Option(None, help="Name of the session"),
     directory: str = typer.Option(None, help="Directory to save session in"),
     stepwise: bool = typer.Option(False, help="Acquire stepwise"),
-    defocus_offset: float = typer.Option(6.0)
+    defocus_offset: float = typer.Option(2.0)
 ):
     from rich.prompt import Confirm
+    serialem = connect_sem()
     killer = GracefulKiller()
     session_o = load_session(session_name, directory)
     session_o.active_grid.state.stepwise = stepwise
@@ -468,7 +580,7 @@ def acquire(
                 padding=1,
             )
         )
-        progress.start_task(grid_task)
+        #progress.start_task(grid_task)
         
         def progress_callback(grid, report, acquisition_area, type=None):
             global numbad
@@ -515,9 +627,14 @@ def acquire(
                     log_string += f" {numbad} failed corrections"
 
                 progress.console.log(log_string)
-                if killer.kill_now or numbad > 20:
+                if "potential_overfocus" in report and report["potential_overfocus"]:
+                    handle_problem(serialem, session_o, acquisition_area, "Potential Overfocus detected")
+                if numbad > 20:
+                    handle_problem(serialem,session_o,acquisition_area,"More than 20 bad predictions")
+                if killer.kill_now:
                     grid.state.stepwise = True
                 if grid.state.stepwise:
+                    serialem.Exit(1)
                     with PauseProgress(progress):
                         cont = Confirm.ask("Continue?")
                     if not cont:
@@ -528,6 +645,7 @@ def acquire(
                         with PauseProgress(progress):
                             continous = Confirm.ask("Continous:")
                         if continous:
+                            killer.kill_now = False
                             grid.state.stepwise = False
                         else:
                             print("Aborting!")
