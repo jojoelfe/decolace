@@ -55,8 +55,9 @@ def main(
     if project is None:
         potential_projects = glob.glob("*.decolace")
         if len(potential_projects) == 0:
-            typer.echo("No project file found")
-            raise typer.Exit()
+            project_object = None
+            ctx.obj = SimpleNamespace(project = None, acquisition_areas = [], match_template_job = None, cistem_path = cistem_path)
+            return
         project = Path(potential_projects[0])
     project_object = ProcessingProject.read(project)
     aas_to_process = project_object.acquisition_areas

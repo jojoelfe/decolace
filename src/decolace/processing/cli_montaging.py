@@ -36,6 +36,9 @@ def run_montage(
     from rich.console import Console
     import starfile
     from numpy.linalg import LinAlgError
+    import glob
+    from decolace.processing.project_managment import ProcessingProject
+
 
     console = Console()
     
@@ -66,6 +69,8 @@ def run_montage(
             
             output_directory.mkdir(parents=True, exist_ok=True)
             output_path = output_directory / f"{aa.area_name}_tile_metadata.star"
+            if type(decolace_data) is not dict:
+                decolace_data = dict(decolace_data)
             tile_metadata_result = create_tile_metadata(cistem_data, decolace_data, output_path)
             tile_metadata = tile_metadata_result["tiles"] 
             aa.initial_tile_star = output_path

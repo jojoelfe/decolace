@@ -77,6 +77,8 @@ def run_unblur(
 @app.command()
 def run_ctffind(
     ctx: typer.Context,
+    cmd_prefix: str = typer.Option("", help="Prefix of run command"),
+    cmd_suffix: str = typer.Option("", help="Suffix of run command"),
     num_cores: int = typer.Option(10, help="Number of cores to use"),
 ):
     """
@@ -91,7 +93,7 @@ def run_ctffind(
         typer.echo(f"Running ctffind for {aa.area_name}")
         pars, image_info = ctffind.parameters_from_database(aa.cistem_project,decolace=True)
 
-        res = ctffind.run(pars,num_procs=num_cores)
+        res = ctffind.run(pars,num_procs=num_cores,cmd_prefix=cmd_prefix,cmd_suffix=cmd_suffix)
 
         ctffind.write_results_to_database(aa.cistem_project,pars,res,image_info)
         aa.ctffind_run = True

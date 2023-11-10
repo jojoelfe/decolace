@@ -293,7 +293,7 @@ def join_matches(
         filtered_matches_starfile = Path(aa.cistem_project).parent / "Assets" / "TemplateMatching" / f"{aa.area_name}_{ctx.obj.match_template_job.run_id}_tm_package_filtered_{use_filtered}.star"
         if filtered_matches_starfile.exists():
             new_matches = starfile.read(filtered_matches_starfile)
-            if len(new_matches) > 0:
+            if len(new_matches) > 10:
                 matches.append(new_matches)
     combined_matches = pd.concat(matches, ignore_index=True)
     combined_matches_starfile = Path(ctx.obj.project.project_path) / "Matches" / f"combined_{ctx.obj.match_template_job.run_name}_{ctx.obj.match_template_job.run_id}_{name}.star"
