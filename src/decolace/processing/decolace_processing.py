@@ -42,7 +42,7 @@ def read_data_from_cistem(database_filename: Path) -> pd.DataFrame:
         )
         selected_micrographs = pd.merge(df1, df2, on="CTF_ESTIMATION_ID")
         df3 = pd.read_sql_query(
-            "SELECT MOVIE_ASSET_ID,IMAGE_SHIFT_X, IMAGE_SHIFT_Y, CONTENT_JSON FROM MOVIE_ASSETS_METADATA",
+            "SELECT MOVIE_ASSET_ID,IMAGE_SHIFT_X, IMAGE_SHIFT_Y, CONTENT_JSON, ACQUISITION_TIME FROM MOVIE_ASSETS_METADATA",
             con,
         )
         selected_micrographs = pd.merge(selected_micrographs, df3, on="MOVIE_ASSET_ID")
@@ -70,6 +70,17 @@ def read_decolace_data(decolace_filename: Path) -> dict:
 
     return np.load(decolace_filename, allow_pickle=True).item()
 
+def prune_bad_shifts(shifts: pd.DataFrame, inital_area_cutoff_as_fraction_of_median:float = 0.2, cc_cutoff_as_fraction_of_media:float=0.5):
+
+    init_len = len(shifts)
+    shifts = shifts[shifts["initial_area"] > inital_area_cutoff_as_fraction_of_median * shifts["initial_area"].median()]
+    message = f"Pruned {init_len-len(shifts)} shifts with an initial area smaller than {inital_area_cutoff_as_fraction_of_median} times the median initial area of {shifts['initial_area'].median()}\n"
+
+    init_len = len(shifts)
+    shifts = shifts[shifts["max_cc"] > cc_cutoff_as_fraction_of_media * shifts["max_cc"].median()]
+    message += f"Pruned {init_len-len(shifts)} shifts with a max cc smaller than {cc_cutoff_as_fraction_of_media} times the median max cc of {shifts['max_cc'].median()}\n"
+
+    return shifts, message
 
 def create_tile_metadata(
     cistem_data: pd.DataFrame, decolace_data: dict, output_filename: Path
@@ -98,6 +109,7 @@ def create_tile_metadata(
             "tile_image_shift_pixel_y": pd.Series(dtype="int"),
             "tile_microscope_focus": pd.Series(dtype="float"),
             "tile_defocus": pd.Series(dtype="float"),
+            "tile_acquisition_time": pd.Series(dtype="int"),
         }
     )
 
@@ -139,6 +151,7 @@ def create_tile_metadata(
         new_entry["tile_image_shift_pixel_y"] = item["image_shift_pixel_y"]
         new_entry["tile_microscope_focus"] = json.loads(item["CONTENT_JSON"])["Defocus"]
         new_entry["tile_defocus"] = (item["DEFOCUS1"] + item["DEFOCUS2"]) / 2
+        new_entry["tile_acquisition_time"] = item["ACQUISITION_TIME"]
         matches_dir = Path(item["FILENAME"]).parent.parent / "TemplateMatching"
         matches_filenames = list(
             matches_dir.glob(Path(item["FILENAME"][:-6]).name + "*plotted_result*.mrc")
@@ -234,6 +247,10 @@ def create_montage(montage_metadata: dict, output_path_montage: Path, erode_mask
     binning = montage_metadata["montage"]["montage_binning"].values[0]
     #print(f"Initialisation took {time.perf_counter() - prev} seconds")
     prev = time.perf_counter()
+    # Sort montage_metadate by tile_acquisition_time
+    montage_metadata["tiles"] = montage_metadata["tiles"].sort_values(
+        by="tile_acquisition_time", ascending=True
+    )
     for item in track(
         montage_metadata["tiles"].iterrows(),
         total=len(montage_metadata["tiles"].index),
@@ -289,11 +306,14 @@ def create_montage(montage_metadata: dict, output_path_montage: Path, erode_mask
         
     median_value = np.median(montage[np.nonzero(mask_montage)])
     montage[mask_montage == 0] = median_value
-    prev = time.perf_counter()
     with mrcfile.new(output_path_montage, overwrite=True) as mrc:
         mrc.set_data(montage)
         mrc.voxel_size = montage_metadata["montage"]["montage_pixel_size"].values[0]
-    #print(f"Writing montage took {time.perf_counter() - prev} seconds")
+    with mrcfile.new(
+        output_path_montage.parent / "montage_mask.mrc", overwrite=True
+    ) as mrc:
+        mrc.set_data(mask_montage)
+        mrc.voxel_size = montage_metadata["montage"]["montage_pixel_size"].values[0]
 
 
 def adjust_metadata_for_matches(montage_data: dict, match_data: pd.DataFrame, image: str = "PROJECTION_RESULT_OUTPUT_FILE"):
@@ -360,6 +380,9 @@ def determine_shift_by_cc(
     mask_size_cutoff: int = 100,
     overlap_ratio: float = 0.1,
 ):
+    import time
+    # Create the montage
+    prev = time.perf_counter()
     # Given the infow of two images, calculate the refined relative shifts by crosscorrelation return
     im1, im2 = doubled
 
@@ -379,14 +402,16 @@ def determine_shift_by_cc(
             order=filter_order,
             high_pass=False,
         )
-
+    #print(f"Loading images took {time.perf_counter() - prev} seconds")
+    prev = time.perf_counter()
     diff = (
         im2["tile_image_shift_pixel_x"] - im1["tile_image_shift_pixel_x"],
         im2["tile_image_shift_pixel_y"] - im1["tile_image_shift_pixel_y"],
     )
     tform = transform.SimilarityTransform(translation=(diff[0], diff[1])).inverse
     moving = transform.warp(moving, tform, output_shape=reference.shape)
-
+    #print(f"Transforming images took {time.perf_counter() - prev} seconds")
+    prev = time.perf_counter()
     with mrcfile.open(im1["tile_mask_filename"]) as mrc:
         reference_mask = np.copy(mrc.data[0])
         reference_mask.dtype = np.uint8
@@ -395,20 +420,23 @@ def determine_shift_by_cc(
         moving_mask = np.copy(mrc.data[0])
         moving_mask.dtype = np.uint8
         moving_mask = moving_mask / 255.0
-
+    #print(f"Opening masks took {time.perf_counter() - prev} seconds")
+    prev = time.perf_counter()
     if erode_mask > 0:
         reference_mask = reference_mask > 0.5
         moving_mask = moving_mask > 0.5
         reference_mask = binary_erosion(reference_mask, iterations=erode_mask)
         moving_mask = binary_erosion(moving_mask, iterations=erode_mask)
-
+    #print(f"Eroding masks took {time.perf_counter() - prev} seconds")
+    prev = time.perf_counter()
     moving_mask = transform.warp(moving_mask, tform, output_shape=reference_mask.shape)
     mask = np.minimum(reference_mask, moving_mask) > 0.9
     if np.sum(mask) < mask_size_cutoff:
         return None
     reference *= mask
     moving *= mask
-
+    #print(f"precross took {time.perf_counter() - prev} seconds")
+    prev = time.perf_counter()
     xcorr = cross_correlate_masked(
         moving,
         reference,
@@ -418,7 +446,8 @@ def determine_shift_by_cc(
         mode="full",
         overlap_ratio=overlap_ratio,
     )
-
+    #print(f"Cross took {time.perf_counter() - prev} seconds")
+    prev = time.perf_counter()
     # Generalize to the average of multiple equal maxima
     maxima = np.stack(np.nonzero(xcorr == xcorr.max()), axis=1)
     center = np.mean(maxima, axis=0)
@@ -430,7 +459,8 @@ def determine_shift_by_cc(
             ratio = np.sum(reference) / np.sum(moving)
         except FloatingPointError:
             ratio = 1
-
+    #print(f"Final took {time.perf_counter() - prev} seconds")
+    prev = time.perf_counter()
     return {
         "shift_x": diff[0] + shift[1],
         "shift_y": diff[1] + shift[0],

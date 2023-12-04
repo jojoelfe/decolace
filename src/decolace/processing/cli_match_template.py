@@ -102,7 +102,7 @@ def run_matchtemplate(
         all_image_info.append(image_info)
         typer.echo(f"{len(image_info)} tiles out of {orig_num} still to process")
         if len(image_info) == 0:
-            typer.echo(f"All tiles already processed")
+            typer.echo("All tiles already processed")
             continue
     all_image_info = pd.concat(all_image_info)
     typer.echo(f"Total of {len(all_image_info)} tiles to process")

@@ -102,7 +102,6 @@ def status(
 ):
     from pycistem.database import get_num_movies, get_num_images, get_num_already_processed_images, get_num_matches
     from rich.table import Table
-    from rich.live import Live
     from rich import print
     from glob import glob
     import json
@@ -122,68 +121,78 @@ def status(
     table.add_column("Ctffind")
     table.add_column("Montage")
 
-    with Live(table,refresh_per_second=4,vertical_overflow="visible") as live:
     
-        for i, aa in enumerate(ctx.obj.acquisition_areas):
-            # Get size and modification time of the file aa.cistem_project
-            if aa.cistem_project is None:
-                table.add_row(
-                       str(i),
-                       aa.area_name,
-                       ":x:",
-                       ":x:",
-                       ":x:",
-                       ":x:")
-                continue
-            cistem_project_path = Path(aa.cistem_project)
-            if not cistem_project_path.exists():
-                table.add_row(
+    for i, aa in enumerate(ctx.obj.acquisition_areas):
+        # Get size and modification time of the file aa.cistem_project
+        if aa.cistem_project is None:
+            table.add_row(
                     str(i),
                     aa.area_name,
                     ":x:",
                     ":x:",
                     ":x:",
                     ":x:")
-                continue
-            cistem_project_size = str(cistem_project_path.stat().st_size)
-            cistem_project_mtime = str(cistem_project_path.stat().st_mtime)
-                
-            if f"{aa.area_name}_preprocessing" in status_cache and status_cache[f"{aa.area_name}_preprocessing"][0] == cistem_project_size and status_cache[f"{aa.area_name}_preprocessing"][1] == cistem_project_mtime:
-                num_movies = status_cache[f"{aa.area_name}_preprocessing"][2]
-                num_images = status_cache[f"{aa.area_name}_preprocessing"][3]
-                ctffind_run = status_cache[f"{aa.area_name}_preprocessing"][4]
-                montage_run = status_cache[f"{aa.area_name}_preprocessing"][5]
-            else:
-                num_movies = f"✓ {get_num_movies(aa.cistem_project)}" if aa.cistem_project is not None else ":x:"
-                num_images = f"✓ {get_num_images(aa.cistem_project)}" if aa.unblur_run else ":x:"
-                ctffind_run = "✓" if aa.ctffind_run else ":x:"
-                montage_run = "✓" if aa.montage_image is not None else ":x:"
-                status_cache[f"{aa.area_name}_preprocessing"] = [cistem_project_size, cistem_project_mtime, num_movies, num_images, ctffind_run, montage_run]
-                json.dump(status_cache, open(status_chache_file, "w"))
-                
+            continue
+        cistem_project_path = Path(aa.cistem_project)
+        if not cistem_project_path.exists():
             table.add_row(
                 str(i),
                 aa.area_name,
-                num_movies,
-                num_images,
-                ctffind_run,
-                montage_run
-            )
-        live.update(table)
+                ":x:",
+                ":x:",
+                ":x:",
+                ":x:")
+            continue
+        cistem_project_size = str(cistem_project_path.stat().st_size)
+        cistem_project_mtime = str(cistem_project_path.stat().st_mtime)
+            
+        if f"{aa.area_name}_preprocessing" in status_cache and status_cache[f"{aa.area_name}_preprocessing"][0] == cistem_project_size and status_cache[f"{aa.area_name}_preprocessing"][1] == cistem_project_mtime:
+            num_movies = status_cache[f"{aa.area_name}_preprocessing"][2]
+            num_images = status_cache[f"{aa.area_name}_preprocessing"][3]
+            ctffind_run = status_cache[f"{aa.area_name}_preprocessing"][4]
+            montage_run = status_cache[f"{aa.area_name}_preprocessing"][5]
+        else:
+            num_movies = f"✓ {get_num_movies(aa.cistem_project)}" if aa.cistem_project is not None else ":x:"
+            num_images = f"✓ {get_num_images(aa.cistem_project)}" if aa.unblur_run else ":x:"
+            ctffind_run = "✓" if aa.ctffind_run else ":x:"
+            montage_run = "✓" if aa.montage_image is not None else ":x:"
+            status_cache[f"{aa.area_name}_preprocessing"] = [cistem_project_size, cistem_project_mtime, num_movies, num_images, ctffind_run, montage_run]
+            json.dump(status_cache, open(status_chache_file, "w"))
+            
+        table.add_row(
+            str(i),
+            aa.area_name,
+            num_movies,
+            num_images,
+            ctffind_run,
+            montage_run
+        )
+    print(table)
 
     match_template_table = Table(title="Match Template Status")
     match_template_table.add_column("AA")
     
     for mtm in ctx.obj.project.match_template_runs:
         match_template_table.add_column(f"{mtm.run_id}: {mtm.run_name}")
-    with Live(match_template_table,refresh_per_second=4,vertical_overflow="visible") as live:
        
-        for aa in ctx.obj.acquisition_areas:
+    for aa in ctx.obj.acquisition_areas:
+        if aa.cistem_project is None:
+            continue
+        cistem_project_path = Path(aa.cistem_project)
+        if not cistem_project_path.exists():
+            continue
+        cistem_project_size = str(cistem_project_path.stat().st_size)
+        cistem_project_mtime = str(cistem_project_path.stat().st_mtime)
+        
+        if f"{aa.area_name}_match_template" in status_cache and status_cache[f"{aa.area_name}_match_template"][0] == cistem_project_size and status_cache[f"{aa.area_name}_match_template"][1] == cistem_project_mtime:
+            mtm_status = status_cache[f"{aa.area_name}_match_template"][2]
+        else:
             mtm_status = []
             for mtm in ctx.obj.project.match_template_runs:        
                 mtm_status.append(f"{get_num_already_processed_images(aa.cistem_project, mtm.run_id)}/{get_num_images(aa.cistem_project)} {get_num_matches(aa.cistem_project, mtm.run_id)} Matches")
-            
-            match_template_table.add_row(
-                aa.area_name, *mtm_status)
-        
-        live.update(match_template_table)
+            status_cache[f"{aa.area_name}_match_template"] = [cistem_project_size, cistem_project_mtime, mtm_status]
+            json.dump(status_cache, open(status_chache_file, "w"))   
+        match_template_table.add_row(
+            aa.area_name, *mtm_status)
+    
+    print(match_template_table)

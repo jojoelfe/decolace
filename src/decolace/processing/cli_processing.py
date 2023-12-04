@@ -7,13 +7,15 @@ from rich import print
 from rich.logging import RichHandler
 from typer.core import TyperGroup
 
-from decolace.processing.project_managment import ProcessingProject
+from decolace.processing.project_managment import ProcessingProject, DLContext, DLGlobals
 
 from decolace.processing.cli_project_managment import app as project_managment_app
 from decolace.processing.cli_preprocessing import app as preprocessing_app
 from decolace.processing.cli_montaging import app as montaging_app
 from decolace.processing.cli_match_template import app as match_template_app
 from decolace.processing.cli_single_particle import app as single_particle_app
+from decolace.processing.cli_edittags import app as edittags_app
+from decolace.processing.cli_visualization import app as visualization_app
 
 class OrderCommands(TyperGroup):
   def list_commands(self, ctx: typer.Context):
@@ -39,11 +41,17 @@ app.registered_commands += match_template_app.registered_commands
 for command in single_particle_app.registered_commands:
     command.rich_help_panel="Single Particle Commands"
 app.registered_commands += single_particle_app.registered_commands
+for command in edittags_app.registered_commands:
+    command.rich_help_panel="Edit Tags Commands"
+app.registered_commands += edittags_app.registered_commands
+for command in visualization_app.registered_commands:
+    command.rich_help_panel="Visualization Commands"
+app.registered_commands += visualization_app.registered_commands
 
 
 @app.callback()
 def main(
-    ctx: typer.Context,
+    ctx: DLContext,
     project: Path = typer.Option(None, help="Path to wanted project file",rich_help_panel="Expert Options"),
     acquisition_area_name: List[str] = typer.Option(None, help="List of acquisition areas names to process"),
     select_condition: str = typer.Option(None, help="Condition to select acquisition areas"),
@@ -72,4 +80,4 @@ def main(
         mtr = project_object.match_template_runs[array_position]
     else:
         mtr = None
-    ctx.obj = SimpleNamespace(project = project_object, acquisition_areas = aas_to_process, match_template_job = mtr, cistem_path = cistem_path)
+    ctx.obj = DLGlobals(project = project_object, acquisition_areas = aas_to_process, match_template_job = mtr, cistem_path = cistem_path)
