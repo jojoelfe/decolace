@@ -73,8 +73,10 @@ def main(
         aas_to_process = [aa for aa in project_object.acquisition_areas if aa.area_name in acquisition_area_name]
     if select_condition is not None:
         conditions = process_experimental_conditions(aas_to_process)
-        key, value = select_condition.split("=")
-        aas_to_process = [aa for i, aa in enumerate(aas_to_process) if key in conditions and i in conditions[key] and conditions[key][i] == value]
+        for con in select_condition.split(","):
+            key, value = con.split("=")
+            aas_to_process = [aa for i, aa in enumerate(aas_to_process) if key in conditions[i] and conditions[i][key] == value]
+            conditions = [c for i, c in enumerate(conditions) if key in conditions[i] and conditions[i][key] == value]
     if match_template_job_id is not None:
         array_position = [mtr.run_id  for mtr in project_object.match_template_runs].index(match_template_job_id)
         mtr = project_object.match_template_runs[array_position]

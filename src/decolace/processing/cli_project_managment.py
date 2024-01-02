@@ -121,7 +121,7 @@ def status(
     table.add_column("Ctffind")
     table.add_column("Montage")
 
-    
+    tot_unblur = 0
     for i, aa in enumerate(ctx.obj.acquisition_areas):
         # Get size and modification time of the file aa.cistem_project
         if aa.cistem_project is None:
@@ -158,7 +158,7 @@ def status(
             montage_run = "✓" if aa.montage_image is not None else ":x:"
             status_cache[f"{aa.area_name}_preprocessing"] = [cistem_project_size, cistem_project_mtime, num_movies, num_images, ctffind_run, montage_run]
             json.dump(status_cache, open(status_chache_file, "w"))
-            
+        tot_unblur += int(num_movies[1:])
         table.add_row(
             str(i),
             aa.area_name,
@@ -167,6 +167,14 @@ def status(
             ctffind_run,
             montage_run
         )
+    table.add_row(
+        "Total",
+        str(i+1),
+        f"{tot_unblur}",
+        "",
+        "",
+        ""
+    )
     print(table)
 
     match_template_table = Table(title="Match Template Status")
@@ -174,7 +182,10 @@ def status(
     
     for mtm in ctx.obj.project.match_template_runs:
         match_template_table.add_column(f"{mtm.run_id}: {mtm.run_name}")
-       
+    
+    mtm_totals = []
+    for mtm in ctx.obj.project.match_template_runs:
+        mtm_totals.append(0)
     for aa in ctx.obj.acquisition_areas:
         if aa.cistem_project is None:
             continue
@@ -191,8 +202,12 @@ def status(
             for mtm in ctx.obj.project.match_template_runs:        
                 mtm_status.append(f"{get_num_already_processed_images(aa.cistem_project, mtm.run_id)}/{get_num_images(aa.cistem_project)} {get_num_matches(aa.cistem_project, mtm.run_id)} Matches")
             status_cache[f"{aa.area_name}_match_template"] = [cistem_project_size, cistem_project_mtime, mtm_status]
-            json.dump(status_cache, open(status_chache_file, "w"))   
+            json.dump(status_cache, open(status_chache_file, "w"))
+        for i, mtm in enumerate(ctx.obj.project.match_template_runs):
+            mtm_totals[i] += int(mtm_status[i].split(" ")[1])   
         match_template_table.add_row(
             aa.area_name, *mtm_status)
-    
+    mtm_totals = [str(mtm_total) for mtm_total in mtm_totals]
+    match_template_table.add_row(
+            "Total", *mtm_totals)
     print(match_template_table)
