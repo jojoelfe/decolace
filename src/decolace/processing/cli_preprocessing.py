@@ -80,6 +80,10 @@ def run_ctffind(
     cmd_prefix: str = typer.Option("", help="Prefix of run command"),
     cmd_suffix: str = typer.Option("", help="Suffix of run command"),
     num_cores: int = typer.Option(10, help="Number of cores to use"),
+    fit_nodes: bool = typer.Option(True, help="Fit nodes"),
+    fit_nodes_brute_force: bool = typer.Option(True, help="Fit nodes brute force"),
+    fit_nodes_lowres: float = typer.Option(30.0, help="Fit nodes lowres"),
+    fit_nodes_highres: float = typer.Option(4.0, help="Fit nodes highres"),
 ):
     """
     Run ctffind for each acquisition area
@@ -93,6 +97,11 @@ def run_ctffind(
         typer.echo(f"Running ctffind for {aa.area_name}")
         pars, image_info = ctffind.parameters_from_database(aa.cistem_project,decolace=True)
 
+        for par in pars:
+            par.fit_nodes = fit_nodes
+            par.fit_nodes_1D_brute_force = fit_nodes_brute_force
+            par.fit_nodes_low_resolution_limit = fit_nodes_lowres
+            par.fit_nodes_high_resolution_limit = fit_nodes_highres
         res = ctffind.run(pars,num_procs=num_cores,cmd_prefix=cmd_prefix,cmd_suffix=cmd_suffix)
 
         ctffind.write_results_to_database(aa.cistem_project,pars,res,image_info)
@@ -104,7 +113,8 @@ def update_database(
     project_main: Path = typer.Option(None, help="Path to wanted project file")
 ):
     from pycistem.core import Project
-
+    import glob 
+    from decolace.processing.project_managment import ProcessingProject
     if project_main is None:
         project_path = Path(glob.glob("*.decolace")[0])
     project = ProcessingProject.read(project_path)

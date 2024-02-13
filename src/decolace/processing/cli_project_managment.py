@@ -204,7 +204,11 @@ def status(
             status_cache[f"{aa.area_name}_match_template"] = [cistem_project_size, cistem_project_mtime, mtm_status]
             json.dump(status_cache, open(status_chache_file, "w"))
         for i, mtm in enumerate(ctx.obj.project.match_template_runs):
-            mtm_totals[i] += int(mtm_status[i].split(" ")[1])   
+            if i >= len(mtm_status):
+                continue
+            split_line = mtm_status[i].split(" ")
+            if len(split_line) > 1:
+                mtm_totals[i] += int(split_line[1])   
         match_template_table.add_row(
             aa.area_name, *mtm_status)
     mtm_totals = [str(mtm_total) for mtm_total in mtm_totals]

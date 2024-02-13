@@ -8,6 +8,86 @@ from pathlib import Path
 app = typer.Typer()
 
 @app.command()
+def split_particles_into_experimental_groups(
+    ctx: typer.Context,
+    tmpackage_star_file: Path = typer.Argument(..., help="Path to the tmpackage star file"),
+    variables: list[str] = typer.Argument(..., help="Variables to split by"),
+    extract: bool = typer.Option(False, help="Extract the particles"),
+):
+    """
+    Splits particles into experimental groups based on specified variables.
+
+    Args:
+        ctx (typer.Context): The Typer context object.
+        tmpackage_star_file (Path): Path to the tmpackage star file.
+        variables (list[str]): Variables to split the particles by.
+
+    Returns:
+        None
+    """
+    import starfile
+    import pandas as pd
+    from rich.progress import track
+    from decolace.processing.project_managment import generate_aa_dataframe
+    particle_info = starfile.read(tmpackage_star_file)
+    aa_info = generate_aa_dataframe(ctx.obj.acquisition_areas)
+    aa_info["image_folder"] = aa_info["cistem_project"].map(lambda x: str(Path(x).parent / "Assets" / "Images" ))
+    particle_info["image_folder"] = particle_info["cisTEMOriginalImageFilename"].str.strip("'").map(lambda x: str(Path(x).parent))
+    particle_info = particle_info.join(aa_info.set_index("image_folder"), on="image_folder", rsuffix="_aa")
+    (tmpackage_star_file.parent / tmpackage_star_file.stem).mkdir(exist_ok=True)
+    def write_and_print(x):
+        name = "_".join(x.name)
+        print(f"Writing {tmpackage_star_file.parent / tmpackage_star_file.stem / name}.star")
+        # Only keep columns starting with cisTEM
+        x = x.filter(like="cisTEM")
+        x["cisTEMPositionInStack"] = [i+1 for i in range(len(x))]
+        x["cisTEMOccupancy"] = 1.0
+        x["cisTEMImageActivity"] = 1
+        starfile.write(x, tmpackage_star_file.parent / tmpackage_star_file.stem / f"{name}.star", overwrite=True, quote_all_strings=True, quote_character="'")
+        
+        if extract:
+            from pycistem.utils import extract_particles
+            
+            for _ in track(extract_particles(tmpackage_star_file.parent / tmpackage_star_file.stem / f"{name}.star",tmpackage_star_file.parent / tmpackage_star_file.stem / f"{name}.mrc"), description=f"Extracting {name}", total=len(x)):
+                pass
+        
+    particle_info.groupby(variables).apply(write_and_print)
+
+@app.command()
+def reconstruct_split_particles(
+    ctx: typer.Context,
+    star_directory: Path = typer.Argument(..., help="Path to the directory containing the split star files"),
+    pixel_size: float = typer.Option(2.0, help="Pixel size of the particles"),
+):
+    #logging.basicConfig(
+    #    level=logging.DEBUG,
+    #    format="%(message)s",
+    #    handlers=[
+    #        RichHandler(),
+    #        #logging.FileHandler(current_output_directory / "log.log")
+    #    ]
+    #)
+    from pycistem.programs.reconstruct3d import Reconstruct3dParameters, run
+    starfiles = star_directory.glob("*.star")
+    pars = []
+    for star in starfiles:
+        reconstructPar = Reconstruct3dParameters(
+            input_star_filename=str(star),
+            input_particle_stack=str(star.with_suffix(".mrc")),
+            output_reconstruction_1=str(star.parent / f"{star.stem}_reconstruction1.mrc"),
+            output_reconstruction_2=str(star.parent / f"{star.stem}_reconstruction2.mrc"),
+            output_reconstruction_filtered=str(star.parent / f"{star.stem}_reconstruction_filtered.mrc"),
+            output_resolution_statistics=str(star.parent / f"{star.stem}_resolution_statistics.txt"),
+            pixel_size=pixel_size,
+            molecular_mass_kDa=3000.0
+        )
+        pars.append(reconstructPar)
+    print(pars)
+    run(pars, num_threads=10)
+
+
+
+@app.command()
 def split_particles_into_optical_groups(
     ctx: typer.Context,
     tmpackage_star_file: Path,

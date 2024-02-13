@@ -6,6 +6,8 @@ import glob
 from rich import print
 from rich.logging import RichHandler
 from typer.core import TyperGroup
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 from decolace.processing.project_managment import ProcessingProject, DLContext, DLGlobals
 

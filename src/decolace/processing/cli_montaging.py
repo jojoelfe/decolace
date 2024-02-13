@@ -1,23 +1,19 @@
 import typer
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 app = typer.Typer()
 
 @app.command()
 def reset_montage(
-    project_main: Path = typer.Option(None, help="Path to wanted project file"),
+    ctx: typer.Context,
 ):
-    if project_main is None:
-        project_path = Path(glob.glob("*.decolace")[0])
-    project = ProcessingProject.read(project_path)
-
-    for aa in project.acquisition_areas:
+    for aa in ctx.obj.acquisition_areas:
         aa.montage_image = None
         aa.montage_star = None
         aa.initial_tile_star = None
         aa.refined_tile_star = None
-    project.write()
+    ctx.obj.project.write()
 
 @app.command()
 def run_montage(
@@ -33,20 +29,18 @@ def run_montage(
     overlap_ratio: float = typer.Option(0.2, help="Overlap ratio parameter for masked crosscorrelation"),
     redo: bool = typer.Option(False, help="Redo the montage even if it already exists"),
     redo_montage: bool = typer.Option(False, help="Redo only the creatin of the montage even if it already exists"),
+    max_mean_density: Optional[float] = typer.Option(None, help="Maximum mean density of the tiles"),
+    cc_cutoff_as_fraction_of_median: float = typer.Option(0.5, help="Cutoff for the cross-correlation as a fraction of the median cross-correlation"),
 ):
     from rich.console import Console
     import starfile
     from numpy.linalg import LinAlgError
     import pandas as pd
-    import glob
-    from decolace.processing.project_managment import ProcessingProject
-
 
     console = Console()
     
-    from decolace.processing.decolace_processing import read_data_from_cistem, read_decolace_data, create_tile_metadata, find_tile_pairs, calculate_shifts, calculate_refined_image_shifts, calculate_refined_intensity, create_montage_metadata, create_montage, prune_bad_shifts
+    from decolace.processing.decolace_processing import read_data_from_cistem, read_decolace_data, create_tile_metadata, find_tile_pairs, calculate_shifts, calculate_refined_image_shifts, calculate_refined_intensity, create_montage_metadata, create_montage, prune_bad_shifts, prune_tiles
     import numpy as np
-    
     for i, aa in enumerate(ctx.obj.acquisition_areas):
         if aa.montage_image is not None and not redo and not redo_montage:
             continue
@@ -69,7 +63,9 @@ def run_montage(
             if type(decolace_data) is not dict:
                 decolace_data = dict(decolace_data)
             tile_metadata_result = create_tile_metadata(cistem_data, decolace_data, output_path)
-            tile_metadata = tile_metadata_result["tiles"] 
+            tile_metadata = tile_metadata_result["tiles"]
+            tile_metadata, message = prune_tiles(tile_metadata, max_mean_density=max_mean_density)
+            console.log(message) 
             aa.initial_tile_star = output_path
             typer.echo(f"Wrote tile metadata to {output_path}.")
         else:
@@ -78,7 +74,6 @@ def run_montage(
             typer.echo(f"Read tile metadata from {aa.initial_tile_star}.")
         
         # I should sort by acquisition time here
-
         if aa.refined_tile_star is None or redo:
             estimated_distance_threshold = np.median(
                 tile_metadata["tile_x_size"] * tile_metadata["tile_pixel_size"]
@@ -98,7 +93,7 @@ def run_montage(
                     f"Shifts were adjusted. Mean: {np.mean(shifts['add_shift']):.2f} A, Median: {np.median(shifts['add_shift']):.2f} A, Std: {np.std(shifts['add_shift']):.2f} A. Min: {np.min(shifts['add_shift']):.2f} A, Max: {np.max(shifts['add_shift']):.2f} A."
                 )
                 # TODO: prune bad shifts and then tiles with no shifts
-                shifts, message = prune_bad_shifts(shifts)
+                shifts, message = prune_bad_shifts(shifts,cc_cutoff_as_fraction_of_media=cc_cutoff_as_fraction_of_median)
                 shifts = shifts.copy()
                 console.log(message)
 

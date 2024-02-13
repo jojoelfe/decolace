@@ -4,6 +4,7 @@ import multiprocessing
 import sqlite3
 from functools import partial
 from pathlib import Path
+from typing import Optional
 
 import mrcfile
 import numpy as np
@@ -69,6 +70,20 @@ def read_matches_data(database_filename: Path, tm_job_id: int) -> pd.DataFrame:
 def read_decolace_data(decolace_filename: Path) -> dict:
 
     return np.load(decolace_filename, allow_pickle=True).item()
+
+def prune_tiles(tile_metadata, max_mean_density: Optional[float] = None) -> tuple[pd.DataFrame, str]:
+    if max_mean_density is None:
+        return tile_metadata, ""
+    good_tiles = []
+    initial_len = len(tile_metadata)
+    for i, tile in tile_metadata.iterrows():
+        with mrcfile.open(tile["tile_filename"]) as mrc:
+            mean_density = mrc.header["dmean"]
+        if mean_density < max_mean_density:
+            good_tiles.append(i)
+    tile_metadata = tile_metadata.loc[good_tiles]
+    message = f"Pruned {initial_len-len(good_tiles)} tiles with a mean density higher than {max_mean_density}.\n"
+    return tile_metadata.copy(), message
 
 def prune_bad_shifts(shifts: pd.DataFrame, inital_area_cutoff_as_fraction_of_median:float = 0.2, cc_cutoff_as_fraction_of_media:float=0.5):
 
@@ -379,6 +394,7 @@ def determine_shift_by_cc(
     filter_order=4.0,
     mask_size_cutoff: int = 100,
     overlap_ratio: float = 0.1,
+    debug: bool = True,
 ):
     import time
     # Create the montage
@@ -446,6 +462,11 @@ def determine_shift_by_cc(
         mode="full",
         overlap_ratio=overlap_ratio,
     )
+    if debug:
+        with mrcfile.new(
+            f"debug_{Path(im1['tile_filename']).name}_vs_{Path(im2['tile_filename']).name}.mrc", overwrite=True
+        ) as mrc:
+            mrc.set_data(xcorr)
     #print(f"Cross took {time.perf_counter() - prev} seconds")
     prev = time.perf_counter()
     # Generalize to the average of multiple equal maxima
