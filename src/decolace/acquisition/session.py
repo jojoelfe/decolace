@@ -22,8 +22,8 @@ class SessionState(BaseModel):
     active_grid: Optional[int] = None
     beam_radius: Optional[float] = None
     fringe_free_focus_vacuum: Optional[float] = None
-    min_defocus_for_ffsearch: Optional[float] = 30
-    max_defocus_for_ffsearch: Optional[float] = 80
+    min_defocus_for_ffsearch: Optional[float] = -10
+    max_defocus_for_ffsearch: Optional[float] = 10
     fringe_free_focus_cross_grating: Optional[float] = None
     dose_rate_e_per_pix_s: Optional[float] = None
     unbinned_pixel_size_A: Optional[float] = None
@@ -69,8 +69,8 @@ class session:
                 new_grid = grid(grid_info[0], grid_info[1])
                 new_grid.load_from_disk()
                 self.grids.append(new_grid)
-            except FileNotFoundError:
-                print(f"Can't load grid {grid_info[0]}")
+            except FileNotFoundError as e:
+                print(f"Can't load grid {grid_info[0]} {e}")
                 
 
     def add_grid(self, name, tilt):
@@ -160,9 +160,13 @@ class session:
                 print(f"Error could not center beam")
                 return
 
-        #serialem.MoveStage(0,0, -50.0)
-        wanted_defocus = -1.0    
-        
+        #serialem.MoveStage(0,0, 10.0)
+        wanted_defocus = -1.0
+        # Get Focus using record mode wihtout adjusting focus    
+        #measured_defocus = serialem.G(-1,-1)
+        #defocus_error = wanted_defocus - measured_defocus
+        #serialem.MoveStage(0,0,defocus_error)
+
         serialem.Record()
         serialem.FFT("A")
         powerspectrum = np.asarray(serialem.bufferImage("AF"))

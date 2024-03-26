@@ -55,7 +55,7 @@ class grid:
     def load_from_disk(self):
         potential_files = glob.glob(os.path.join(self.directory, self.name + "_*.npy"))
         if len(potential_files) < 1:
-            raise (FileNotFoundError("Couldn't find saved files"))
+            raise (FileNotFoundError("Couldn't find saved files grid"))
         most_recent = sorted(potential_files)[-1]
         self.state = np.load(most_recent, allow_pickle=True).item()
         #self.state = GridState(**self.state)
@@ -144,6 +144,8 @@ class grid:
             if np.sum(aa.state.positions_acquired) == len(
                 aa.state.positions_acquired
             ):
+                continue
+            if aa.state.aborted:
                 continue
             serialem.SetImageShift(0.0, 0.0)
             if np.sum(aa.state.positions_acquired) == 0:

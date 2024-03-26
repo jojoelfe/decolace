@@ -140,6 +140,19 @@ def print_aa_state(
         print(aa.state)
 
 @app.command()
+def set_aa_state_abort(
+    name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None , help="Directory to save session in"),
+    id: int = typer.Option(...),
+): 
+    session_o = load_session(name, directory)
+    for i, aa in enumerate(session_o.active_grid.acquisition_areas):
+        if i == id:
+            aa.state.aborted = True
+            aa.write_to_disk()
+        print(aa.state.aborted)
+
+@app.command()
 def set_session_state(
     name: str = typer.Option(None, help="Name of the session"),
     directory: str = typer.Option(None , help="Directory to save session in"),
@@ -454,7 +467,15 @@ def setup_lamellae(
         pool = Pool(processes=1)
         image = pool.map(get_nice_view,[session_o])[0]
         existing_data = viewer.layers
-        
+
+@app.command()
+def monitor(
+    session_name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory to save session in"),
+):
+    serialem = connect_sem()
+    session_o = load_session(session_name, directory)
+           
 
 @app.command()
 def setup_areas(
@@ -508,6 +529,7 @@ def setup_areas(
             aa.initialize_from_napari(map_navids[int(map_id)], [polygon.centroid.y, polygon.centroid.x], area[:,1:3])
             aa.calculate_acquisition_positions_from_napari(beam_radius=session_o.state.beam_radius, use_square_beam=use_square_beam, start_from_bottom=start_from_bottom)
             aa.write_to_disk()
+            aa.save_map(maps[int(map_id)])
             session_o.active_grid.state.acquisition_areas.append([aa.name,aa.directory])
             session_o.active_grid.acquisition_areas.append(aa)
         session_o.active_grid.write_to_disk()
@@ -585,11 +607,13 @@ def acquire(
         def progress_callback(grid, report, acquisition_area, type=None):
             global numbad
             if type == "start_new_area":
+                numbad = 0
                 progress.console.log(
                     f"Starting acquisition of area {acquisition_area.name} in grid {grid.name}"
                 )
                 
             elif type == "resume_area":
+                numbad = 0
                 progress.console.log(
                     f"Resuming acquisition of area {acquisition_area.name} in grid {grid.name}"
                 )

@@ -178,7 +178,16 @@ class AcquisitionAreaSingle:
         most_recent = sorted(potential_files)[-1]
         self.state = np.load(most_recent, allow_pickle=True).item()
 
-     
+    def save_map(self, map):
+        import mrcfile
+
+        mrcfile.new(os.path.join(self.directory, self.name + "_map.mrc"), map)
+
+    def load_map(self):
+        import mrcfile
+
+        return mrcfile.read(os.path.join(self.directory, self.name + "_map.mrc"))
+    
     def initialize_from_napari(
         self, map_navigator_id: int, center_coordinate, corner_coordinates, affine= None
     ):
@@ -402,24 +411,28 @@ class AcquisitionAreaSingle:
                 fraction_of_gradient = (np.cos((index % self.state.defocus_steps)/self.state.defocus_steps * 2* np.pi) + 1) /2
                 self.state.desired_defocus = self.state.low_defocus + fraction_of_gradient * (self.state.high_defocus-self.state.low_defocus)
             offset = self.state.desired_defocus - measured_defocus
-            
+            true_offset = offset
             
             if abs(offset) > self.state.ctf_max_step and established_lock:
                 offset = self.state.ctf_max_step * np.sign(offset)
                 if num_max_correction == 0:
-                    offset_before_max_correction = abs(offset)
+                    offset_before_max_correction = abs(true_offset)
                 num_max_correction += 1
 
             else:
                 if abs(offset) > self.state.ctf_max_step_initially:
                     offset = self.state.ctf_max_step_initially * np.sign(offset)
                     if num_max_correction == 0:
-                        offset_before_max_correction = abs(offset)
+                        offset_before_max_correction = abs(true_offset)
                     num_max_correction += 1
                 else:
                     num_max_correction = 0
-            if num_max_correction > 3 and abs(offset) > offset_before_max_correction:
-                report["potential_overfocus"] = True
+            if num_max_correction > 2 and abs(true_offset) > offset_before_max_correction:
+                correction_attempt = -1.6 * true_offset
+                print(f"Overfocus, trying to correct by {correction_attempt} instead of {offset}")
+                offset = correction_attempt
+                
+                #report["potential_overfocus"] = True
 
             if abs(offset) < 0.1 and not established_lock and last_bs_correction < 0.06:
                 established_lock = True
