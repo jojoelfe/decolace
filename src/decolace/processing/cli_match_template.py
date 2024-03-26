@@ -16,6 +16,8 @@ def run_matchtemplate(
     defocus_step: float = typer.Option(0.0, help="Defocus step for template matching"),
     defocus_range: float = typer.Option(0.0, help="Defocus range for template matching"),
     save_mip: bool = typer.Option(False, help="Save MIP of template"),
+    symmetry: str = typer.Option("C1", help="Symmetry of the template"),
+    run_on: str = typer.Option("all", help="Run on all or a subset of acquisition areas"),
 ):
     """Runs match template on all images in the acquisition areas"""
     from decolace.processing.project_managment import MatchTemplateRun
@@ -25,7 +27,7 @@ def run_matchtemplate(
     from pycistem.database import get_already_processed_images
     import pandas as pd
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format="%(message)s",
         handlers=[
             RichHandler(),
@@ -45,7 +47,9 @@ def run_matchtemplate(
         "milano": 8,
         "sofia": 8,
         "manchester": 8,
-    }   
+    }  
+    if run_on != "all":
+        run_profile = {run_on: run_profile[run_on]}
     
     new_mtr = True
     if ctx.obj.match_template_job is None:
@@ -65,6 +69,7 @@ def run_matchtemplate(
         defocus_step = ctx.obj.match_template_job.defocus_step
         defocus_range = ctx.obj.match_template_job.defocus_range
         match_template_job_id = ctx.obj.match_template_job.run_id
+        symmetry = ctx.obj.match_template_job.symmetry
         typer.echo(f"Template match job id already exists, continuing job {ctx.obj.match_template_job.run_name}")
         typer.echo(f"template_filename={template.absolute().as_posix()}, angular_step={angular_step}, in_plane_angular_step={in_plane_angular_step} defous_step={defocus_step}, defocus_range={defocus_range}, decolace=True)")
 
@@ -78,6 +83,7 @@ def run_matchtemplate(
                 in_plane_angular_step=in_plane_angular_step,
                 defocus_step=defocus_step,
                 defocus_range=defocus_range,
+                symmetry=symmetry
             )
         )
         ctx.obj.project.write()
@@ -94,6 +100,7 @@ def run_matchtemplate(
             par.defocus_step = defocus_step
             par.defocus_search_range = defocus_range
             par.max_threads = 2
+            par.my_symmetry = symmetry
             if save_mip:
                 par.mip_output_file = par.scaled_mip_output_file.replace("_scaled_mip.mrc", "_mip.mrc")
         
@@ -102,7 +109,7 @@ def run_matchtemplate(
         all_image_info.append(image_info)
         typer.echo(f"{len(image_info)} tiles out of {orig_num} still to process")
         if len(image_info) == 0:
-            typer.echo(f"All tiles already processed")
+            typer.echo("All tiles already processed")
             continue
     all_image_info = pd.concat(all_image_info)
     typer.echo(f"Total of {len(all_image_info)} tiles to process")
@@ -117,6 +124,8 @@ def run_matchtemplate(
 @app.command()
 def create_tmpackage(
     ctx: typer.Context,
+    force_incomplete: bool = typer.Option(False, help="Force creation of tm package even if not all images have been processed"),
+    swap_phi_and_psi: bool = typer.Option(False, help="Swap phi and psi in tm package"),
 ):
     """Creates a Template-Matches Package for each acquisition area (i.e. a star file containing all matches)"""
     from pycistem.database import get_num_already_processed_images, write_match_template_to_starfile, insert_tmpackage_into_db, get_num_images
@@ -125,14 +134,16 @@ def create_tmpackage(
     for aa in ctx.obj.acquisition_areas:
         if get_num_already_processed_images(aa.cistem_project, ctx.obj.match_template_job.run_id) != get_num_images(aa.cistem_project):
             typer.echo(f"No images processed for {aa.area_name}")
-            continue
+            typer.echo(f"Processed {get_num_already_processed_images(aa.cistem_project, ctx.obj.match_template_job.run_id)} out of {get_num_images(aa.cistem_project)}")
+            if not force_incomplete:
+                continue
         
         typer.echo(f"Creating tm package for {aa.area_name}")
         output_filename = Path(aa.cistem_project).parent / "Assets" / "TemplateMatching" / f"{aa.area_name}_{ctx.obj.match_template_job.run_id}_tm_package.star"
         if output_filename.exists():
             typer.echo(f"Package already exists for {aa.area_name}")
             continue
-        write_match_template_to_starfile(aa.cistem_project, ctx.obj.match_template_job.run_id, output_filename)  
+        write_match_template_to_starfile(aa.cistem_project, ctx.obj.match_template_job.run_id, output_filename, switch_phi_psi=swap_phi_and_psi)  
         insert_tmpackage_into_db(aa.cistem_project, f"DeCOoLACE_{aa.area_name}_TMRun_{ctx.obj.match_template_job.run_id}", output_filename)
         
 @app.command()
@@ -153,7 +164,7 @@ def run_refinetemplate(
             input_starfile=tm_package_file.as_posix(),
             output_starfile=tm_package_file.with_suffix('').as_posix()+'_refined.star',
             input_template=Path(ctx.obj.match_template_job.template_path).as_posix(),
-            num_threads=10
+            num_threads=10,
         )
         if Path(par.output_starfile).exists():
             typer.echo(f"Refined tm package already exists for {aa.area_name}")
@@ -293,7 +304,7 @@ def join_matches(
         filtered_matches_starfile = Path(aa.cistem_project).parent / "Assets" / "TemplateMatching" / f"{aa.area_name}_{ctx.obj.match_template_job.run_id}_tm_package_filtered_{use_filtered}.star"
         if filtered_matches_starfile.exists():
             new_matches = starfile.read(filtered_matches_starfile)
-            if len(new_matches) > 0:
+            if len(new_matches) > 10:
                 matches.append(new_matches)
     combined_matches = pd.concat(matches, ignore_index=True)
     combined_matches_starfile = Path(ctx.obj.project.project_path) / "Matches" / f"combined_{ctx.obj.match_template_job.run_name}_{ctx.obj.match_template_job.run_id}_{name}.star"

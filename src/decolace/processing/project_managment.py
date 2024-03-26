@@ -8,11 +8,15 @@ from math import isnan
 from pydantic import BaseModel
 from pydantic import BeforeValidator
 
+import typer
+
 
 def coerce_nan_to_none(x: Any) -> Any:
     if x is None:
         return x
     if type(x) is str:
+        if x == "None":
+            return None
         return x
     if type(x) is PosixPath:
         return x
@@ -48,13 +52,14 @@ class MatchTemplateRun(BaseModel):
     run_name: str
     run_id: int
     template_path: Union[Path, str]
-    template_size: Optional[float] = None
-    template_bfm: Optional[float] = None
+    template_size: NoneOrNan[float] = None
+    template_bfm: NoneOrNan[float] = None
     threshold_offset: float = 0.0
     angular_step: float = 3.0
     in_plane_angular_step: float = 2.0
     defocus_step: float = 0.0
     defocus_range: float = 0.0
+    symmetry: str = "C1"
 
 
 
@@ -107,6 +112,15 @@ class ProcessingProject(BaseModel):
             ]
         return cls(**project_info, acquisition_areas=acquisition_areas, match_template_runs=match_template_runs)
 
+class DLGlobals(BaseModel):
+    project: ProcessingProject
+    cistem_path: str 
+    acquisition_areas: list[AcquisitionAreaPreProcessing]
+    match_template_job: Optional[MatchTemplateRun]
+
+class DLContext(typer.Context):
+    obj: DLGlobals
+
 def process_experimental_conditions(acquisition_areas: List[AcquisitionAreaPreProcessing]):
     from collections import defaultdict
     experimental_conditions_column = [aa.experimental_condition for aa in acquisition_areas]
@@ -120,4 +134,23 @@ def process_experimental_conditions(acquisition_areas: List[AcquisitionAreaPrePr
                 continue
             key, value = split
             unique_conditions[key][i] = value
-    return unique_conditions
+    return_data = [{key: unique_conditions[key][i] for key in unique_conditions if i in unique_conditions[key]} for i,aa in enumerate(acquisition_areas)]
+    return return_data
+
+def generate_aa_dataframe(acquisition_areas: List[AcquisitionAreaPreProcessing]):
+    from collections import defaultdict
+    experimental_conditions_column = [aa.experimental_condition for aa in acquisition_areas]
+    unique_conditions = defaultdict(dict)
+    for i, ec_line in enumerate(experimental_conditions_column):
+        if ":" not in ec_line:
+            continue
+        for ec in ec_line.split(";"):
+            split = ec.split(":")
+            if len(split) != 2:
+                continue
+            key, value = split
+            unique_conditions[key][i] = value
+    aa_info = pd.DataFrame([aa.model_dump() for aa in acquisition_areas])
+    for key in unique_conditions:
+        aa_info[key] = [unique_conditions[key][i] if i in unique_conditions[key] else None for i,aa in enumerate(acquisition_areas)]
+    return aa_info
