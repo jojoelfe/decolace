@@ -355,7 +355,7 @@ class AcquisitionAreaSingle:
             if counts > self.state.count_threshold_for_beamshift and self.state.beamshift_correction:
                 report["correcting_beamshift"] = True
                 beam_shift_before_centering = np.array(serialem.ReportBeamShift())
-                serialem.CenterBeamFromImage(0, 0.4)
+                beam_shift_error = serialem.CenterBeamFromImage(0, 0.2)
                 beam_shift_after_centering = np.array(serialem.ReportBeamShift())
                 last_bs_correction = np.linalg.norm(
                     beam_shift_before_centering - beam_shift_after_centering

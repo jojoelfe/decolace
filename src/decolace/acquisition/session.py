@@ -30,8 +30,7 @@ class SessionState(BaseModel):
     cross_euc_Z_height: Optional[float] = None
     cross_ff_Z_height: Optional[float] = None
     euc_to_ff_offset: Optional[float] = None
-    problem_policy: ProblemPolicy = 'next'
-
+    problem_policy: ProblemPolicy = ProblemPolicy.NEXT
     class Config:
         arbitrary_types_allowed = True
 
@@ -163,10 +162,20 @@ class session:
         #serialem.MoveStage(0,0, 10.0)
         wanted_defocus = -1.0
         # Get Focus using record mode wihtout adjusting focus    
-        #measured_defocus = serialem.G(-1,-1)
-        #defocus_error = wanted_defocus - measured_defocus
-        #serialem.MoveStage(0,0,defocus_error)
+        serialem.G(-1,-1)
+        measured_defocus, error_code = serialem.ReportAutoFocus()
+        print(measured_defocus)
+        
+        defocus_error = wanted_defocus - measured_defocus
+        serialem.MoveStage(0,0,defocus_error)
 
+        serialem.G(-1,-1)
+        measured_defocus, error_code = serialem.ReportAutoFocus()
+        print(measured_defocus)
+        
+        defocus_error = wanted_defocus - measured_defocus
+        serialem.MoveStage(0,0,defocus_error)
+        serialem.Delay(1,'s')
         serialem.Record()
         serialem.FFT("A")
         powerspectrum = np.asarray(serialem.bufferImage("AF"))
@@ -183,6 +192,7 @@ class session:
         while abs(defocus_error) > 0.1 and num_tries < 10:
             num_tries += 1
             serialem.MoveStage(0,0,defocus_error)
+            serialem.Delay(1,'s')
             serialem.Record()
             serialem.FFT("A")
             powerspectrum = np.asarray(serialem.bufferImage("AF"))

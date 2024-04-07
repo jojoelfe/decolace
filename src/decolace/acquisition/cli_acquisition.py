@@ -152,6 +152,17 @@ def set_aa_state_abort(
             aa.write_to_disk()
         print(aa.state.aborted)
 
+from .session import ProblemPolicy
+@app.command()
+def set_problem_policy(
+    policy: ProblemPolicy = typer.Argument(..., help="Name of the policy"),
+    name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None , help="Directory to save session in"),
+):
+    session_o = load_session(name, directory)
+    session_o.state.problem_policy = policy
+    session_o.write_to_disk()
+
 @app.command()
 def set_session_state(
     name: str = typer.Option(None, help="Name of the session"),
@@ -227,6 +238,18 @@ def status(
         typer.echo(
             f"Grid: {grid.name} contains {len(grid.acquisition_areas)} acquisition areas"
         )
+
+@app.command()
+def reset_aa(
+    aa: int = typer.Argument(..., help="Acquisition area to reset"),
+    session_name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory to save session in"),
+    
+):
+    session_o = load_session(session_name, directory)
+    print(session_o.active_grid.acquisition_areas[aa].name)
+    session_o.active_grid.acquisition_areas[aa].state.positions_acquired[:] = False
+    session_o.active_grid.acquisition_areas[aa].write_to_disk()
 
 
 @app.command()
@@ -565,17 +588,61 @@ def handle_problem(serialem, session_o: session, aa: AcquisitionAreaSingle, mess
         aa.state.aborted = True
     else:
         serialem.SetColumnOrGunValve(0)
-        typer.Exit()
+        raise typer.Exit()
+        exit()
 
+from multiprocessing import Process
+class StatusServer(Process):
+    def __init__(self):
+        self.aa = -1
+        self.updates = []
+        super().__init__()
+    def run(self):
+        from multiprocessing.managers import BaseManager
+        killer = GracefulKiller()
+        man = BaseManager(address=('',55777),authkey=b'ab')
+        man.register('aa', lambda: self.aa )
+        man.register('set_aa', lambda x: setattr(self,'aa',x))
+        man.register('updates', lambda: self.updates)
+        s = man.get_server()
+        s.serve_forever()
+
+@app.command()
+def connect_status_manager():
+    from multiprocessing.managers import BaseManager
+    import time
+    man = BaseManager(address=('localhost',55777),authkey=b'ab')
+    man.connect()
+    man.register('aa')
+    man.register('set_aa')
+    man.register('updates')
+    while True:
+        print(man.aa())
+        print(man.updates())
+        time.sleep(5)
 
 @app.command()
 def acquire(
     session_name: str = typer.Option(None, help="Name of the session"),
     directory: str = typer.Option(None, help="Directory to save session in"),
     stepwise: bool = typer.Option(False, help="Acquire stepwise"),
-    defocus_offset: float = typer.Option(2.0)
+    defocus_offset: float = typer.Option(2.0),
+    run_status_manager: bool = typer.Option(False, help="Use status manager")
 ):
     from rich.prompt import Confirm
+
+    if run_status_manager:
+        import time
+        from multiprocessing.managers import BaseManager
+        status_server = StatusServer()
+        status_server.start()
+        time.sleep(1)
+        man = BaseManager(address=('localhost',55777),authkey=b'ab')
+        man.connect()
+        man.register('aa')
+        man.register('set_aa')
+        man.register('updates')
+
     serialem = connect_sem()
     killer = GracefulKiller()
     session_o = load_session(session_name, directory)
@@ -617,7 +684,17 @@ def acquire(
                 progress.console.log(
                     f"Resuming acquisition of area {acquisition_area.name} in grid {grid.name}"
                 )
+            if run_status_manager:
+                try:
+                    man.set_aa(acquisition_area.name)
+                except:
+                    pass
             if report is not None:
+                if run_status_manager:
+                    try:
+                        man.updates().append(report)
+                    except:
+                        pass
                 progress.update(grid_task, advance=1,refresh=True)
                 numbad += 1
                 log_string = f"{report['position']}/{len(acquisition_area.state.acquisition_positions)} "
