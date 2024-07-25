@@ -29,7 +29,9 @@ def get_distance_to_edge(orig_image_filename,refined_matches,binning_boxsize):
                 pixel_position_x,
             ]
         except IndexError:
+            print(f"IndexError for {orig_image_filename}")
             refined_matches.loc[i, "LACEBeamEdgeDistance"] = 0
+    #refined_matches["LACEBeamEdgeDistance"] = refined_matches["LACEBeamEdgeDistance"].fillna(0)
     # Compute variance after binning
     with mrcfile.open(image_filename) as image:
         micrograph = image.data

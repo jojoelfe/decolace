@@ -62,13 +62,18 @@ class MatchTemplateRun(BaseModel):
     symmetry: str = "C1"
 
 
+class RunProfileCommand(BaseModel):
+    pass
 
+class RunProfile(BaseModel):
+    pass
    
 
 class ProcessingProject(BaseModel):
     project_name: str
     project_path: Path
     processing_pixel_size: float = 2.0
+
     acquisition_areas: List[AcquisitionAreaPreProcessing] = []
     match_template_runs: List[MatchTemplateRun] = []
 

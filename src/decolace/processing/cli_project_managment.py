@@ -39,13 +39,13 @@ def add_acquisition_area(
 
     aa = AcquisitionAreaSingle(area_name, area_directory.as_posix())
     aa.load_from_disk()
-    if np.sum(aa.state['positions_acquired']) == 0:
+    if np.sum(aa.state.positions_acquired) == 0:
                 print(f"{aa.name}: No Data")
     aa_pre = AcquisitionAreaPreProcessing(
                 area_name = f"{session_name}_{grid_name}_{aa.name}",
                 decolace_acquisition_area_info_path = sorted(Path(aa.directory).glob(f"{aa.name}*.npy"))[-1],
                 decolace_grid_info_path = None,
-                decolace_session_info_path = None,
+                decolace_session_info_path = sorted(Path(aa.directory).parent.parent.glob(f"{session_name}*.npy"))[-1],
                 frames_folder = aa.frames_directory,
             )
     ctx.obj.project.acquisition_areas.append(aa_pre)

@@ -31,6 +31,7 @@ def run_montage(
     redo_montage: bool = typer.Option(False, help="Redo only the creatin of the montage even if it already exists"),
     max_mean_density: Optional[float] = typer.Option(None, help="Maximum mean density of the tiles"),
     cc_cutoff_as_fraction_of_median: float = typer.Option(0.5, help="Cutoff for the cross-correlation as a fraction of the median cross-correlation"),
+    debug: bool = typer.Option(False, help="Debug mode")
 ):
     from rich.console import Console
     import starfile

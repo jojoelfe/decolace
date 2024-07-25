@@ -12,8 +12,10 @@ import pandas as pd
 import starfile
 from rich.progress import track
 from scipy import optimize
-from scipy.ndimage import binary_erosion
+from scipy.ndimage import binary_erosion, mean
 from scipy.spatial import cKDTree
+from scipy.signal import savgol_filter
+from scipy.interpolate import interp1d
 from skimage import filters, transform
 from skimage.registration._masked_phase_cross_correlation import cross_correlate_masked
 from skimage.transform import resize
@@ -204,12 +206,12 @@ def create_montage_metadata(
     unbinned_size_x = (
         tile_data["tile_image_shift_pixel_x"].max()
         + tile_data["tile_x_size"].max()
-        - tile_data["tile_image_shift_pixel_x"].min()
+        - tile_data["tile_image_shift_pixel_x"].min() + binning*5
     )
     unbinned_size_y = (
         tile_data["tile_image_shift_pixel_y"].max()
         + tile_data["tile_y_size"].max()
-        - tile_data["tile_image_shift_pixel_y"].min()
+        - tile_data["tile_image_shift_pixel_y"].min() +  binning*5
     )
 
     x_offset = tile_data["tile_image_shift_pixel_x"].min()
@@ -240,8 +242,21 @@ def create_montage_metadata(
     starfile.write(results, output_path_metadata, overwrite=True)
     return results
 
+def calculate_diagonal_radius(box_size: int = 512) -> int:
+    return int(np.around(np.sqrt(2 * (box_size / 2 - 0.5) ** 2)))
 
-def create_montage(montage_metadata: dict, output_path_montage: Path, erode_mask: int = 0):
+def distance_from_center_array(shape) -> np.ndarray:
+    x, y = np.ogrid[0:shape[0], 0:shape[1]]
+    size = np.min(shape)
+    r = np.hypot(x - (size - 1) / 2, y - (size - 1) / 2)
+    return r
+
+def radial_average(spectrum: np.ndarray) -> np.ndarray:
+    distance_from_center = distance_from_center_array(spectrum.shape)
+    bins = np.around(distance_from_center).astype(np.int32)
+    return mean(spectrum, labels=bins, index=np.arange(1, calculate_diagonal_radius(spectrum.shape[0])+1))
+
+def create_montage(montage_metadata: dict, output_path_montage: Path, erode_mask: int = 0, correct_dark_ring: bool = True, dark_ring_start: float = 0.9, dark_ring_windowlength: int = 50):
     import time
     # Create the montage
     prev = time.perf_counter()
@@ -292,8 +307,28 @@ def create_montage(montage_metadata: dict, output_path_montage: Path, erode_mask
         )
         #print(f"Opening took {time.perf_counter() - prev} seconds")
         prev = time.perf_counter()
+        if correct_dark_ring and tile.shape[0] > 4000 and tile.shape[1] > 4000:
+            ra = radial_average(tile)
+            shape = tile.shape
+            x, y = np.ogrid[0:shape[0], 0:shape[1]]
+            size = np.min(shape)
+            r = np.hypot(x - (size - 1) / 2, y - (size - 1) / 2)
+            correction_image = np.ones_like(r)
+
+            smoothed_curve = savgol_filter(ra[int((shape[0]//2)*0.9):(shape[0]//2)], dark_ring_windowlength, 3)
+            smoothed_curve = smoothed_curve / smoothed_curve[0]
+            values_to_correct = r[np.where(np.logical_and(r>=int((shape[0]//2)*dark_ring_start), r < shape[0//2]))]
+            oldvalues = radial_average(r)[int((shape[0]//2)*0.9):(shape[0]//2)]
+            correction_image[np.where(np.logical_and(r>=int((shape[0]//2)*dark_ring_start), r < shape[0//2]))] = np.interp(values_to_correct,oldvalues, smoothed_curve)
+
+            #correction_image[r>=int((tile.shape[0]//2)*dark_ring_start)].flatten() = interp1d(correction_image[r>=int((tile.shape[0]//2)*dark_ring_start)].flatten(), 
+            tile = tile / correction_image
+
         tile = resize(tile, tile_binned_dimensions, anti_aliasing=True)
-        mask_float = resize(mask_float, tile_binned_dimensions, anti_aliasing=True)
+        mask_float = resize(mask_float, tile_binned_dimensions, anti_aliasing=False)
+        mask_float = mask_float > 0.5
+        mask_float = mask_float.astype(np.float32)
+        mask_float *= 1.0
         #print(f"Resizing took {time.perf_counter() - prev} seconds")
         prev = time.perf_counter()
         insertion_slice = (
@@ -307,6 +342,9 @@ def create_montage(montage_metadata: dict, output_path_montage: Path, erode_mask
             ),
         )
         tile *= mask_float
+
+        
+
         existing_mask = 1.0 - mask_montage[insertion_slice]
         tile *= existing_mask
         mask_float *= existing_mask
@@ -371,7 +409,7 @@ def calculate_shifts(row_pairs: list, num_proc: int = 1, erode_mask: int = 0, fi
 
     # map the worker function to the input data using the pool
     results = pool.imap_unordered(
-        partial(determine_shift_by_cc, erode_mask=erode_mask, filter_cutoff_frequency_ratio=filter_cutoff_frequency_ratio, filter_order=filter_order,mask_size_cutoff=mask_size_cutoff, overlap_ratio=overlap_ratio), row_pairs
+        partial(determine_shift_by_cc2, erode_mask=erode_mask, filter_cutoff_frequency_ratio=filter_cutoff_frequency_ratio, filter_order=filter_order,mask_size_cutoff=mask_size_cutoff, overlap_ratio=overlap_ratio), row_pairs
     )
     shifts = []
     # use the rich.progress module to track the progress of the results
@@ -394,7 +432,8 @@ def determine_shift_by_cc(
     filter_order=4.0,
     mask_size_cutoff: int = 100,
     overlap_ratio: float = 0.1,
-    debug: bool = True,
+    debug: bool = False,
+    debug_object = {}
 ):
     import time
     # Create the montage
@@ -410,6 +449,8 @@ def determine_shift_by_cc(
             order=filter_order,
             high_pass=False,
         )
+        if debug:
+            debug_object["reference"] = reference.copy()
     with mrcfile.open(im2["tile_filename"]) as mrc:
         moving = np.copy(mrc.data[0])
         moving = filters.butterworth(
@@ -418,6 +459,8 @@ def determine_shift_by_cc(
             order=filter_order,
             high_pass=False,
         )
+        if debug:
+            debug_object["moving"] = moving.copy()
     #print(f"Loading images took {time.perf_counter() - prev} seconds")
     prev = time.perf_counter()
     diff = (
@@ -426,6 +469,8 @@ def determine_shift_by_cc(
     )
     tform = transform.SimilarityTransform(translation=(diff[0], diff[1])).inverse
     moving = transform.warp(moving, tform, output_shape=reference.shape)
+    if debug:
+        debug_object["moving_moved"] = moving.copy()
     #print(f"Transforming images took {time.perf_counter() - prev} seconds")
     prev = time.perf_counter()
     with mrcfile.open(im1["tile_mask_filename"]) as mrc:
@@ -447,6 +492,8 @@ def determine_shift_by_cc(
     prev = time.perf_counter()
     moving_mask = transform.warp(moving_mask, tform, output_shape=reference_mask.shape)
     mask = np.minimum(reference_mask, moving_mask) > 0.9
+    if debug:
+        debug_object["mask"] = mask.copy()
     if np.sum(mask) < mask_size_cutoff:
         return None
     reference *= mask
@@ -463,10 +510,7 @@ def determine_shift_by_cc(
         overlap_ratio=overlap_ratio,
     )
     if debug:
-        with mrcfile.new(
-            f"debug_{Path(im1['tile_filename']).name}_vs_{Path(im2['tile_filename']).name}.mrc", overwrite=True
-        ) as mrc:
-            mrc.set_data(xcorr)
+        debug_object["xcorr"] = xcorr.copy()
     #print(f"Cross took {time.perf_counter() - prev} seconds")
     prev = time.perf_counter()
     # Generalize to the average of multiple equal maxima
@@ -482,6 +526,118 @@ def determine_shift_by_cc(
             ratio = 1
     #print(f"Final took {time.perf_counter() - prev} seconds")
     prev = time.perf_counter()
+    return {
+        "shift_x": diff[0] + shift[1],
+        "shift_y": diff[1] + shift[0],
+        "initial_area": np.sum(mask),
+        "max_cc": xcorr.max(),
+        "add_shift": np.linalg.norm(shift),
+        "int_ratio": ratio,
+        "image_1": im1["tile_filename"],
+        "image_2": im2["tile_filename"],
+    }
+
+def determine_shift_by_cc2(
+    doubled,
+    erode_mask: float = 0,
+    filter_cutoff_frequency_ratio: float = 0.02,
+    filter_order=4.0,
+    mask_size_cutoff: int = 100,
+    overlap_ratio: float = 0.1,
+    debug: bool = False,
+    debug_object = {}
+):
+    # Given the infow of two images, calculate the refined relative shifts by crosscorrelation return
+    im1, im2 = doubled
+
+    # Open the masks
+    with mrcfile.open(im1["tile_mask_filename"]) as mrc:
+        reference_mask = np.copy(mrc.data[0])
+        reference_mask.dtype = np.uint8
+        reference_mask = reference_mask / 255.0
+    with mrcfile.open(im2["tile_mask_filename"]) as mrc:
+        moving_mask = np.copy(mrc.data[0])
+        moving_mask.dtype = np.uint8
+        moving_mask = moving_mask / 255.0
+
+    if erode_mask > 0:
+        reference_mask = reference_mask > 0.5
+        moving_mask = moving_mask > 0.5
+        reference_mask = binary_erosion(reference_mask, iterations=erode_mask)
+        moving_mask = binary_erosion(moving_mask, iterations=erode_mask)
+
+    # Transform mask2
+    diff = (
+        int(im2["tile_image_shift_pixel_x"] - im1["tile_image_shift_pixel_x"]),
+        int(im2["tile_image_shift_pixel_y"] - im1["tile_image_shift_pixel_y"]),
+    ) 
+    tform = transform.SimilarityTransform(translation=(diff[0], diff[1])).inverse
+    moving_mask = transform.warp(moving_mask, tform, output_shape=reference_mask.shape)
+    mask = np.minimum(reference_mask, moving_mask) > 0.9
+    if np.sum(mask) < mask_size_cutoff:
+        return None
+    # Get bounding box of the mask
+    bbox = np.array([np.min(np.nonzero(mask)[0]), np.max(np.nonzero(mask)[0]), np.min(np.nonzero(mask)[1]), np.max(np.nonzero(mask)[1])])
+    # Calculate bounding box for moving
+    bbox_moving = np.array([bbox[0] - diff[1], bbox[1] - diff[1], bbox[2] - diff[0], bbox[3] - diff[0]]) 
+    mask = mask[bbox[0]:bbox[1], bbox[2]:bbox[3]]
+    
+
+    with mrcfile.open(im1["tile_filename"]) as mrc:
+        reference = np.copy(mrc.data[0])
+        # Cut out the bounding box
+        reference = reference[bbox[0]:bbox[1], bbox[2]:bbox[3]]
+        reference = filters.butterworth(
+            reference,
+            cutoff_frequency_ratio=filter_cutoff_frequency_ratio,
+            order=filter_order,
+            high_pass=False,
+        )
+        if debug:
+            debug_object["reference"] = reference.copy()
+    with mrcfile.open(im2["tile_filename"]) as mrc:
+        moving = np.copy(mrc.data[0])
+        # Cut out the bounding box
+        moving = moving[bbox_moving[0]:bbox_moving[1], bbox_moving[2]:bbox_moving[3]]
+        moving = filters.butterworth(
+            moving,
+            cutoff_frequency_ratio=filter_cutoff_frequency_ratio,
+            order=filter_order,
+            high_pass=False,
+        )
+        if debug:
+            debug_object["moving"] = moving.copy()
+    
+   
+
+
+    
+    reference *= mask
+    moving *= mask
+   
+    xcorr = cross_correlate_masked(
+        moving,
+        reference,
+        mask,
+        mask,
+        axes=tuple(range(moving.ndim)),
+        mode="full",
+        overlap_ratio=overlap_ratio,
+    )
+    if debug:
+        debug_object["xcorr"] = xcorr.copy()
+    #print(f"Cross took {time.perf_counter() - prev} seconds")
+    # Generalize to the average of multiple equal maxima
+    maxima = np.stack(np.nonzero(xcorr == xcorr.max()), axis=1)
+    center = np.mean(maxima, axis=0)
+    shift = center - np.array(reference.shape) + 1
+    shift = -shift
+
+    with np.errstate(all="raise"):
+        try:
+            ratio = np.sum(reference) / np.sum(moving)
+        except FloatingPointError:
+            ratio = 1
     return {
         "shift_x": diff[0] + shift[1],
         "shift_y": diff[1] + shift[0],

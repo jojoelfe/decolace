@@ -23,11 +23,11 @@ def run_matchtemplate(
     from decolace.processing.project_managment import MatchTemplateRun
     from pycistem.programs import match_template, generate_gpu_prefix, generate_num_procs
     import pycistem
-    pycistem.set_cistem_path("/groups/elferich/cistem_binaries/")
+    pycistem.set_cistem_path(ctx.obj.cistem_path)
     from pycistem.database import get_already_processed_images
     import pandas as pd
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format="%(message)s",
         handlers=[
             RichHandler(),
@@ -47,6 +47,12 @@ def run_matchtemplate(
         "milano": 8,
         "sofia": 8,
         "manchester": 8,
+        "quebec": 8,
+        "boston": 8,
+        "orleans": 8,
+        "brno": 8,
+        "hannover": 8,
+        "muenchen": 8,
     }  
     if run_on != "all":
         run_profile = {run_on: run_profile[run_on]}
@@ -99,7 +105,7 @@ def run_matchtemplate(
             par.in_plane_angular_step = in_plane_angular_step
             par.defocus_step = defocus_step
             par.defocus_search_range = defocus_range
-            par.max_threads = 2
+            par.max_threads = 6
             par.my_symmetry = symmetry
             if save_mip:
                 par.mip_output_file = par.scaled_mip_output_file.replace("_scaled_mip.mrc", "_mip.mrc")
@@ -114,7 +120,7 @@ def run_matchtemplate(
     all_image_info = pd.concat(all_image_info)
     typer.echo(f"Total of {len(all_image_info)} tiles to process")
 
-    res = match_template.run(all_image_info,num_procs=generate_num_procs(run_profile),cmd_prefix=list(generate_gpu_prefix(run_profile)),cmd_suffix='"', sleep_time=1.0, write_directly_to_db=True)
+    res = match_template.run(all_image_info,num_procs=generate_num_procs(run_profile),cmd_prefix=list(generate_gpu_prefix(run_profile)),cmd_suffix=f'" 2>> /tmp/tmerror.txt 1>> /tmp/tmlog.txt', sleep_time=1.0, write_directly_to_db=True, save_output=False, save_output_path="/tmp/tm_debug/")
         #typer.echo(f"Writing results for {aa.area_name}")
 
         #match_template.write_results_to_database(aa.cistem_project,pars,res,image_info)
@@ -238,9 +244,11 @@ def precompute_filters(
             typer.echo(f"Filter values for matches already exist for {aa.area_name}")
             continue
         refined_matches = starfile.read(refined_matches_starfile)
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            fn = partial(get_distance_to_edge, refined_matches=refined_matches, binning_boxsize=binning_boxsize)
-            executor.map(fn, refined_matches["cisTEMOriginalImageFilename"].unique())
+        for filename in refined_matches["cisTEMOriginalImageFilename"].unique():
+            get_distance_to_edge(filename, refined_matches, binning_boxsize)
+        #with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        #    fn = partial(get_distance_to_edge, refined_matches=refined_matches, binning_boxsize=binning_boxsize)
+        #    executor.map(fn, refined_matches["cisTEMOriginalImageFilename"].unique())
 
         starfile.write(refined_matches, filtered_matches_starfile, overwrite=True)  
 
@@ -269,6 +277,7 @@ def filter_matches(
             typer.echo(f"No refined matches for {aa.area_name}")
             continue
         refined_matches = starfile.read(refined_matches_starfile)
+        refined_matches["LACEBeamEdgeDistance"] = refined_matches["LACEBeamEdgeDistance"].astype(float)
         print(f"Starting with {len(refined_matches)} matches")
         refined_matches = refined_matches[refined_matches["cisTEMScore"] >= refined_score_cutoff]
         print(f"After {refined_score_cutoff} score criterion {len(refined_matches)} matches")
@@ -322,7 +331,7 @@ def join_matches(
             combined_matches.iloc[i,combined_matches.columns.get_loc('cisTEMOriginalImageFilename')] = "'"+str(new_filename)+"'"
         if use_different_pixel_size is not None:
             combined_matches['cisTEMPixelSize'] = use_different_pixel_size
-    starfile.write(combined_matches, combined_matches_starfile, overwrite=True)
+    starfile.write(combined_matches, combined_matches_starfile, overwrite=True, quote_character="'", quote_all_strings=True)
 
     database = create_project(f"processing_{name}", ctx.obj.project.project_path.absolute() / "cistem_projects")
     print(f"{combined_matches_starfile}")

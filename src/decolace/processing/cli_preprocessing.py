@@ -81,6 +81,7 @@ def run_ctffind(
     cmd_suffix: str = typer.Option("", help="Suffix of run command"),
     num_cores: int = typer.Option(10, help="Number of cores to use"),
     fit_nodes: bool = typer.Option(True, help="Fit nodes"),
+    tilt: bool = typer.Option(True, help="Tilt"),
     fit_nodes_brute_force: bool = typer.Option(True, help="Fit nodes brute force"),
     fit_nodes_lowres: float = typer.Option(30.0, help="Fit nodes lowres"),
     fit_nodes_highres: float = typer.Option(4.0, help="Fit nodes highres"),
@@ -89,7 +90,8 @@ def run_ctffind(
     Run ctffind for each acquisition area
     """
     from pycistem.programs import ctffind
-
+    import pycistem
+    pycistem.set_cistem_path(ctx.obj.cistem_path)
   
     for aa in ctx.obj.acquisition_areas:
         if aa.ctffind_run:
@@ -98,6 +100,9 @@ def run_ctffind(
         pars, image_info = ctffind.parameters_from_database(aa.cistem_project,decolace=True)
 
         for par in pars:
+            par.determine_tilt = tilt
+            par.minimum_defocus = 10000
+            par.maximum_defocus = 50000
             par.fit_nodes = fit_nodes
             par.fit_nodes_1D_brute_force = fit_nodes_brute_force
             par.fit_nodes_low_resolution_limit = fit_nodes_lowres
@@ -141,19 +146,16 @@ def redo_projects(
 
 @app.command()
 def redo_unblur(
-    project_main: Path = typer.Option(None, help="Path to wanted project file")
+    ctx: typer.Context,
 ):
    
-    if project_main is None:
-        project_path = Path(glob.glob("*.decolace")[0])
-    project = ProcessingProject.read(project_path)
-
-    for aa in project.acquisition_areas:
+    for aa in ctx.obj.acquisition_areas:
         aa.unblur_run = False
     
-    project.write()
+    ctx.obj.project.write()
 
-@app.command()
+    
+app.command()
 def redo_ctffind(
     project_main: Path = typer.Option(None, help="Path to wanted project file")
 ):
