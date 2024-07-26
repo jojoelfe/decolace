@@ -62,7 +62,12 @@ class grid:
         self.acquisition_areas = []
         for area in self.state.acquisition_areas:
             self.acquisition_areas.append(AcquisitionAreaSingle(area[0], Path(self.directory) / area[0]))
-            self.acquisition_areas[-1].load_from_disk()
+            try:
+                self.acquisition_areas[-1].load_from_disk()
+            except FileNotFoundError:
+                print(f"Couldn't find {self.acquisition_areas[-1].name} on disk, skipping")
+                self.acquisition_areas.pop(-1)
+        self.state.acquisition_areas = [[aa.name, aa.directory] for aa in self.acquisition_areas]
 
     def ensure_view_file_is_open(self):
         serialem = connect_sem()
@@ -80,7 +85,7 @@ class grid:
             else:
                 serialem.OpenNewFile(self.state.view_file)
 
-    def eucentric(self, stage_height_offset=-64.5, do_euc=True):
+    def eucentric(self, stage_height_offset=-68, do_euc=True):
         serialem = connect_sem()
         print("Do")
         serialem.Copy("A", "K")  # Copy to buffer K
@@ -92,18 +97,19 @@ class grid:
         serialem.TiltTo(self.state.tilt)
         serialem.View()
         serialem.Copy("A", "K")  # Copy to buffer K
-        serialem.MoveStage(0, 0, stage_height_offset / 3)
-        serialem.View()
-        serialem.AlignTo("K")
-        serialem.ResetImageShift()
-        serialem.MoveStage(0, 0, stage_height_offset / 3)
-        serialem.View()
-        serialem.AlignTo("K")
-        serialem.ResetImageShift()
-        serialem.MoveStage(0, 0, stage_height_offset / 3)
-        serialem.View()
-        serialem.AlignTo("K")
-        serialem.ResetImageShift()
+        if abs(stage_height_offset) > 0:
+            serialem.MoveStage(0, 0, stage_height_offset / 3)
+            serialem.View()
+            serialem.AlignTo("K")
+            serialem.ResetImageShift()
+            serialem.MoveStage(0, 0, stage_height_offset / 3)
+            serialem.View()
+            serialem.AlignTo("K")
+            serialem.ResetImageShift()
+            serialem.MoveStage(0, 0, stage_height_offset / 3)
+            serialem.View()
+            serialem.AlignTo("K")
+            serialem.ResetImageShift()
 
     def nice_view(self):
         serialem = connect_sem()

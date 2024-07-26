@@ -115,7 +115,7 @@ def rectangular_cover(polygon, radius):
 
 
 class AcquisitionAreaSingleState(BaseModel):
-    desired_defocus: float = -1.0
+    desired_defocus: float = -2.5
     cycle_defocus: bool = False
     low_defocus: float = -0.5
     high_defocus: float = -2.0
@@ -128,7 +128,7 @@ class AcquisitionAreaSingleState(BaseModel):
     count_threshold_for_beamshift: float = 1500
     count_threshold_for_ctf: float = 1500
 
-    ctf_cc_threshold: float = 70
+    ctf_cc_threshold: float = 100
     ctf_step_when_unreliable: float = -0.03
     ctf_max_step_initially: float = 2.0
     ctf_max_step: float = 0.5
@@ -148,6 +148,7 @@ class AcquisitionAreaSingleState(BaseModel):
     positions_still_to_fasttrack: int = 0
     fasttrack: bool = False
     aborted: bool = False
+    record_file: Optional[str] = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -155,7 +156,7 @@ class AcquisitionAreaSingleState(BaseModel):
 class AcquisitionAreaSingle:
     
 
-    def __init__(self, name, directory, defocus=-1.0, tilt=0.0):
+    def __init__(self, name, directory):
         self.name = name
         self.directory = directory
         self.state:AcquisitionAreaSingleState = AcquisitionAreaSingleState()
@@ -232,8 +233,9 @@ class AcquisitionAreaSingle:
             corner_coordinates_stage
         )
         self.state.corner_positions_image = np.array(corner_coordinates)
+        self.state.record_file = os.path.join(self.directory, f"{self.name}_record.mrc")
 
-    def calculate_acquisition_positions_from_napari(self, beam_radius, add_overlap=0.05,  use_square_beam=False, start_from_bottom=False):
+    def calculate_acquisition_positions_from_napari(self, beam_radius, add_overlap=0.025,  use_square_beam=False, start_from_bottom=False):
 
         polygon = Polygon(self.state.corner_positions_specimen)
 
@@ -283,18 +285,37 @@ class AcquisitionAreaSingle:
             reg_y.predict(np.array(specimen_coordinates).reshape(1, -1)),
         )
 
+    def ensure_record_file_is_open(self):
+        serialem = connect_sem()
+        if serialem.ReportFileNumber() < 0:
+            if Path(self.state.record_file).exists():
+                serialem.OpenOldFile(self.state.record_file)
+            else:
+                serialem.OpenNewFile(self.state.record_file)
+            return
+        current_file = serialem.ReportCurrentFilename()
+
+        if Path(current_file).as_posix() != self.state.record_file:
+            if Path(self.state.record_file).exists():
+                serialem.OpenOldFile(self.state.record_file)
+            else:
+                serialem.OpenNewFile(self.state.record_file)
+
     def acquire(
         self,
         established_lock=False,
         initial_defocus=None,
         initial_beamshift=None,
         progress_callback=None,
+        save_record=True,
     ):
         serialem = connect_sem()
         last_bs_correction=0.0
         num_bad_predictions = 0
         num_max_correction = 0
         offset_before_max_correction = 0
+        if save_record:
+            self.ensure_record_file_is_open()
         if self.state.acquisition_positions is None or self.state.positions_acquired is None:
             raise ValueError("No acquisition positions defined")
         for index in range(len(self.state.acquisition_positions)):
@@ -338,8 +359,10 @@ class AcquisitionAreaSingle:
             else:
                 self.state.positions_still_to_fasttrack = 0
                 serialem.ManageDewarsAndPumps(1)
-
+            #serialem.EarlyReturnNextShot(10)
             serialem.Record()
+            if save_record:
+                serialem.Save()
             self.state.positions_acquired[index] = True
             
             if self.state.positions_still_to_fasttrack > 0:
@@ -385,9 +408,11 @@ class AcquisitionAreaSingle:
                 continue
             serialem.FFT("A")
             powerspectrum = np.asarray(serialem.bufferImage("AF"))
+            # TODO: get pixel size from session state
             fit_result = CtfFit.fit_1d(
                 powerspectrum,
-                pixel_size_angstrom=4.24,
+                low_defocus=10000,
+                pixel_size_angstrom=8.36,
                 voltage_kv=300.0,
                 spherical_aberration_mm=2.7,
                 amplitude_contrast=0.07)
@@ -411,6 +436,7 @@ class AcquisitionAreaSingle:
                 fraction_of_gradient = (np.cos((index % self.state.defocus_steps)/self.state.defocus_steps * 2* np.pi) + 1) /2
                 self.state.desired_defocus = self.state.low_defocus + fraction_of_gradient * (self.state.high_defocus-self.state.low_defocus)
             offset = self.state.desired_defocus - measured_defocus
+            print(offset)
             true_offset = offset
             
             if abs(offset) > self.state.ctf_max_step and established_lock:
@@ -427,10 +453,10 @@ class AcquisitionAreaSingle:
                     num_max_correction += 1
                 else:
                     num_max_correction = 0
-            if num_max_correction > 2 and abs(true_offset) > offset_before_max_correction:
-                correction_attempt = -1.6 * true_offset
-                print(f"Overfocus, trying to correct by {correction_attempt} instead of {offset}")
-                offset = correction_attempt
+            #if num_max_correction > 2 and abs(true_offset) > offset_before_max_correction:
+            #    correction_attempt = -1.6 * true_offset
+            #    print(f"Overfocus, trying to correct by {correction_attempt} instead of {offset}")
+            #    offset = correction_attempt
                 
                 #report["potential_overfocus"] = True
 

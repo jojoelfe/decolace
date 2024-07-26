@@ -96,9 +96,10 @@ def new_session(
 def prepare_beam_vacuum(
     name: str = typer.Option(None, help="Name of the session"),
     directory: str = typer.Option(None , help="Directory to save session in"),
+    noff: bool = False
 ):
     session_o = load_session(name, directory)
-    session_o.prepare_beam_vacuum()
+    session_o.prepare_beam_vacuum(coverage=0.95,noff=noff)
     session_o.write_to_disk()
     typer.echo(f"Prepared beam vacuum for session {session_o.name}")
 
@@ -498,7 +499,16 @@ def monitor(
 ):
     serialem = connect_sem()
     session_o = load_session(session_name, directory)
-           
+
+@app.command()
+def remove_last_area(
+    session_name: str = typer.Option(None, help="Name of the session"),
+    directory: str = typer.Option(None, help="Directory to save session in"),
+):
+    #serialem = connect_sem()
+    session_o = load_session(session_name, directory)
+    #session_o.active_grid.acquisition_areas.pop()
+    session_o.active_grid.write_to_disk()
 
 @app.command()
 def setup_areas(
@@ -548,7 +558,7 @@ def setup_areas(
                 raise("Error: Map ID is not the same for all points in the polygon")
             name = f"area{len(session_o.active_grid.state.acquisition_areas)+2}"
             polygon = shapely.geometry.Polygon(area[:,1:3])
-            aa = AcquisitionAreaSingle(name,Path(session_o.active_grid.directory,name).as_posix(),tilt=session_o.active_grid.state.tilt)   
+            aa = AcquisitionAreaSingle(name,Path(session_o.active_grid.directory,name).as_posix())   
             aa.initialize_from_napari(map_navids[int(map_id)], [polygon.centroid.y, polygon.centroid.x], area[:,1:3])
             aa.calculate_acquisition_positions_from_napari(beam_radius=session_o.state.beam_radius, use_square_beam=use_square_beam, start_from_bottom=start_from_bottom)
             aa.write_to_disk()
@@ -751,8 +761,11 @@ def acquire(
                         else:
                             print("Aborting!")
                             raise typer.Abort()
-
-        session_o.active_grid.start_acquisition(initial_defocus=session_o.state.fringe_free_focus_cross_grating-defocus_offset,progress_callback=progress_callback)
+        if session_o.state.fringe_free_focus_cross_grating is None:
+            initial_defocus = -5
+        else:
+            initial_defocus = session_o.state.fringe_free_focus_cross_grating-defocus_offset
+        session_o.active_grid.start_acquisition(initial_defocus=initial_defocus,progress_callback=progress_callback)
 
 @app.callback()
 def main(

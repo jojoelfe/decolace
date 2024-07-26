@@ -160,7 +160,7 @@ class session:
                 return
 
         #serialem.MoveStage(0,0, 10.0)
-        wanted_defocus = -1.0
+        wanted_defocus = -2.5
         # Get Focus using record mode wihtout adjusting focus    
         serialem.G(-1,-1)
         measured_defocus, error_code = serialem.ReportAutoFocus()
@@ -214,7 +214,7 @@ class session:
 
 
 
-    def prepare_beam_vacuum(self, coverage=0.9):
+    def prepare_beam_vacuum(self, coverage=0.9,noff=False):
         serialem = connect_sem()
         from contrasttransferfunction.spectrumhelpers import radial_average
         #Get pixel size
@@ -245,48 +245,48 @@ class session:
             if center_tries > 10:
                 print(f"Error could not center beam")
                 return
-        
-        def calculate_fringe_free_score(defocus):
-            serialem.SetDefocus(defocus)
+        if not noff:
+            def calculate_fringe_free_score(defocus):
+                serialem.SetDefocus(defocus)
+                serialem.Record()
+                serialem.CenterBeamFromImage(0, 1.0)
+                serialem.Record()
+                serialem.CenterBeamFromImage(0, 1.0)
+                serialem.Record()
+
+                beam_image = np.asarray(serialem.bufferImage("A"))
+                # Crop out largest possbile square from the center of slice
+                # Get the dimensions of the array
+                rows, cols = beam_image.shape
+
+                # Calculate the size of the center square
+                size = min(rows, cols)
+
+                # Calculate the starting indices for the slice
+                start_row = (rows - size) // 2
+                start_col = (cols - size) // 2
+
+                # Slice the array to get the center square
+                center = beam_image[start_row:start_row+size, start_col:start_col+size]
+                ra = radial_average(center)
+                
+                minimal_slope = np.diff(ra).min()
+                return minimal_slope
+
+            from scipy.optimize import minimize_scalar
+
+            res = minimize_scalar(calculate_fringe_free_score, 
+                                bounds=(self.state.min_defocus_for_ffsearch, self.state.max_defocus_for_ffsearch), 
+                                method='bounded',
+                                options={"maxiter":10,"disp":True})
+            res = minimize_scalar(calculate_fringe_free_score, 
+                                bounds=(res.x-10.0, res.x+10.0), 
+                                method='bounded',
+                                options={"maxiter":10,"disp":True})
+            self.state.fringe_free_focus_vacuum = res.x
+            serialem.SetDefocus(res.x)
             serialem.Record()
-            serialem.CenterBeamFromImage(0, 1.0)
-            serialem.Record()
-            serialem.CenterBeamFromImage(0, 1.0)
-            serialem.Record()
-
-            beam_image = np.asarray(serialem.bufferImage("A"))
-            # Crop out largest possbile square from the center of slice
-            # Get the dimensions of the array
-            rows, cols = beam_image.shape
-
-            # Calculate the size of the center square
-            size = min(rows, cols)
-
-            # Calculate the starting indices for the slice
-            start_row = (rows - size) // 2
-            start_col = (cols - size) // 2
-
-            # Slice the array to get the center square
-            center = beam_image[start_row:start_row+size, start_col:start_col+size]
-            ra = radial_average(center)
-            
-            minimal_slope = np.diff(ra).min()
-            return minimal_slope
-
-        from scipy.optimize import minimize_scalar
-
-        res = minimize_scalar(calculate_fringe_free_score, 
-                              bounds=(self.state.min_defocus_for_ffsearch, self.state.max_defocus_for_ffsearch), 
-                              method='bounded',
-                              options={"maxiter":10,"disp":True})
-        res = minimize_scalar(calculate_fringe_free_score, 
-                              bounds=(res.x-10.0, res.x+10.0), 
-                              method='bounded',
-                              options={"maxiter":10,"disp":True})
-        self.state.fringe_free_focus_vacuum = res.x
-        serialem.SetDefocus(res.x)
-        serialem.Record()
-        # Optimize beam size
+            # Optimize beam size
 
         beam_diameter = serialem.MeasureBeamSize()
         wanted_beam_diameter = coverage * s_dim_um
