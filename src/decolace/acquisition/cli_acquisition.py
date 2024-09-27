@@ -137,19 +137,20 @@ def print_aa_state(
     directory: str = typer.Option(None , help="Directory to save session in"),
 ): 
     session_o = load_session(name, directory)
-    for aa in session_o.active_grid.acquisition_areas:
-        print(aa.state)
+    for i, aa in enumerate(session_o.active_grid.acquisition_areas):
+        print(f"{i} {aa.state.aborted}")
 
 @app.command()
 def set_aa_state_abort(
     name: str = typer.Option(None, help="Name of the session"),
     directory: str = typer.Option(None , help="Directory to save session in"),
     id: int = typer.Option(...),
+    not_abort: bool = typer.Option(False),
 ): 
     session_o = load_session(name, directory)
     for i, aa in enumerate(session_o.active_grid.acquisition_areas):
         if i == id:
-            aa.state.aborted = True
+            aa.state.aborted = not not_abort
             aa.write_to_disk()
         print(aa.state.aborted)
 
@@ -507,7 +508,7 @@ def remove_last_area(
 ):
     #serialem = connect_sem()
     session_o = load_session(session_name, directory)
-    #session_o.active_grid.acquisition_areas.pop()
+    session_o.active_grid.state.acquisition_areas.pop()
     session_o.active_grid.write_to_disk()
 
 @app.command()

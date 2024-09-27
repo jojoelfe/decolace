@@ -98,15 +98,19 @@ class grid:
         serialem.View()
         serialem.Copy("A", "K")  # Copy to buffer K
         if abs(stage_height_offset) > 0:
-            serialem.MoveStage(0, 0, stage_height_offset / 3)
+            serialem.MoveStage(0, 0, stage_height_offset / 4)
             serialem.View()
             serialem.AlignTo("K")
             serialem.ResetImageShift()
-            serialem.MoveStage(0, 0, stage_height_offset / 3)
+            serialem.MoveStage(0, 0, stage_height_offset / 4)
             serialem.View()
             serialem.AlignTo("K")
             serialem.ResetImageShift()
-            serialem.MoveStage(0, 0, stage_height_offset / 3)
+            serialem.MoveStage(0, 0, stage_height_offset / 4)
+            serialem.View()
+            serialem.AlignTo("K")
+            serialem.ResetImageShift()
+            serialem.MoveStage(0, 0, stage_height_offset / 4)
             serialem.View()
             serialem.AlignTo("K")
             serialem.ResetImageShift()
@@ -114,7 +118,7 @@ class grid:
     def nice_view(self):
         serialem = connect_sem()
         serialem.GoToLowDoseArea("V")
-        serialem.ChangeFocus(-250)
+        serialem.ChangeFocus(-150)
         serialem.SetExposure("V", 10)
         serialem.SetDoseFracParams("V", 1, 1, 0)
         serialem.SetFrameTime("V", 1)
@@ -122,7 +126,7 @@ class grid:
             os.path.abspath(self.state.view_frames_directory)
         )
         serialem.View()
-        serialem.ChangeFocus(250)
+        serialem.ChangeFocus(150)
         serialem.SetExposure("V", 1)
         serialem.SetDoseFracParams("V", 0)
         self.ensure_view_file_is_open()
@@ -130,13 +134,13 @@ class grid:
 
     def take_map(self):
         serialem = connect_sem()
-        serialem.SetDefocus(-10)
+        serialem.SetDefocus(-100)
         serialem.View()
         self.ensure_view_file_is_open()
         serialem.Save()
         serialem.NewMap(0, "decolace_acquisition_map")
         self.save_navigator()
-        serialem.TiltTo(0.0)
+        #serialem.TiltTo(0.0)
 
     def initialize_acquisition_areas(self, navigator_ids):
         pass

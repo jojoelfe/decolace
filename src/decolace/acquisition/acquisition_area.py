@@ -125,8 +125,8 @@ class AcquisitionAreaSingleState(BaseModel):
     corner_positions_stage_diff: Optional[np.ndarray] = None
     corner_positions_stage_absolute: Optional[np.ndarray] = None
     corner_positions_image: Optional[np.ndarray] = None
-    count_threshold_for_beamshift: float = 1500
-    count_threshold_for_ctf: float = 1500
+    count_threshold_for_beamshift: float = 900
+    count_threshold_for_ctf: float = 900
 
     ctf_cc_threshold: float = 100
     ctf_step_when_unreliable: float = -0.03
@@ -470,6 +470,8 @@ class AcquisitionAreaSingle:
             
             if progress_callback is not None:
                 progress_callback(report=report, acquisition_area=self)
+        if save_record:
+            serialem.CloseFile()
            
     def move_to_position(self):
         serialem = connect_sem()
