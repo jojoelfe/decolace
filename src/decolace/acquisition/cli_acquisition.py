@@ -96,9 +96,10 @@ def new_session(
 def prepare_beam_vacuum(
     name: str = typer.Option(None, help="Name of the session"),
     directory: str = typer.Option(None , help="Directory to save session in"),
+    skip_diameter: bool = typer.Option(False, help="Adjust the beam diameter"),
 ):
     session_o = load_session(name, directory)
-    session_o.prepare_beam_vacuum()
+    session_o.prepare_beam_vacuum(adjust_diameter= not skip_diameter)
     session_o.write_to_disk()
     typer.echo(f"Prepared beam vacuum for session {session_o.name}")
 
@@ -148,7 +149,7 @@ def set_aa_state_abort(
     session_o = load_session(name, directory)
     for i, aa in enumerate(session_o.active_grid.acquisition_areas):
         if i == id:
-            aa.state.aborted = True
+            aa.state.aborted = False
             aa.write_to_disk()
         print(aa.state.aborted)
 
@@ -230,6 +231,7 @@ def nice_view(
 def status(
     session_name: str = typer.Option(None, help="Name of the session"),
     directory: str = typer.Option(None, help="Directory to save session in"),
+    full: bool = typer.Option(False)
 ):
     session_o = load_session(session_name, directory)
     typer.echo(f"Session: {session_o.name} contains {len(session_o.grids)} grids")
@@ -238,6 +240,11 @@ def status(
         typer.echo(
             f"Grid: {grid.name} contains {len(grid.acquisition_areas)} acquisition areas"
         )
+        if full:
+            for aa in grid.acquisition_areas:
+                typer.echo(
+                    f"{aa.name} {sum(aa.state.positions_acquired)}/{len(aa.state.positions_acquired)}"
+                )
 
 @app.command()
 def reset_aa(
@@ -626,7 +633,7 @@ def acquire(
     session_name: str = typer.Option(None, help="Name of the session"),
     directory: str = typer.Option(None, help="Directory to save session in"),
     stepwise: bool = typer.Option(False, help="Acquire stepwise"),
-    defocus_offset: float = typer.Option(2.0),
+    defocus_offset: float = typer.Option(-1.0),
     run_status_manager: bool = typer.Option(False, help="Use status manager")
 ):
     from rich.prompt import Confirm
@@ -752,7 +759,7 @@ def acquire(
                             print("Aborting!")
                             raise typer.Abort()
 
-        session_o.active_grid.start_acquisition(initial_defocus=session_o.state.fringe_free_focus_cross_grating-defocus_offset,progress_callback=progress_callback)
+        session_o.active_grid.start_acquisition(initial_defocus=-5,progress_callback=progress_callback)
 
 @app.callback()
 def main(

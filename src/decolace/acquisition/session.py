@@ -22,8 +22,8 @@ class SessionState(BaseModel):
     active_grid: Optional[int] = None
     beam_radius: Optional[float] = None
     fringe_free_focus_vacuum: Optional[float] = None
-    min_defocus_for_ffsearch: Optional[float] = -10
-    max_defocus_for_ffsearch: Optional[float] = 10
+    min_defocus_for_ffsearch: Optional[float] = -5
+    max_defocus_for_ffsearch: Optional[float] = 0
     fringe_free_focus_cross_grating: Optional[float] = None
     dose_rate_e_per_pix_s: Optional[float] = None
     unbinned_pixel_size_A: Optional[float] = None
@@ -214,7 +214,7 @@ class session:
 
 
 
-    def prepare_beam_vacuum(self, coverage=0.9):
+    def prepare_beam_vacuum(self, coverage=0.95, adjust_diameter=True):
         serialem = connect_sem()
         from contrasttransferfunction.spectrumhelpers import radial_average
         #Get pixel size
@@ -291,18 +291,18 @@ class session:
         beam_diameter = serialem.MeasureBeamSize()
         wanted_beam_diameter = coverage * s_dim_um
         print(f"dia {beam_diameter} wanted {wanted_beam_diameter}")
+        if adjust_diameter:
+            for i in range(3):
 
-        for i in range(3):
-
-            current_IA = serialem.ReportIlluminatedArea()
-            print(f"current_IA {current_IA}")
-            new_IA = current_IA * wanted_beam_diameter / beam_diameter[0]
-            print(f"new_IA {new_IA}")
-            serialem.SetIlluminatedArea(new_IA)
-            serialem.UpdateLowDoseParams("R",1)
-            serialem.Record()
-            beam_diameter = serialem.MeasureBeamSize()
-            print(f"dia {beam_diameter} wanted {wanted_beam_diameter}")
+                current_IA = serialem.ReportIlluminatedArea()
+                print(f"current_IA {current_IA}")
+                new_IA = current_IA * wanted_beam_diameter / beam_diameter[0]
+                print(f"new_IA {new_IA}")
+                serialem.SetIlluminatedArea(new_IA)
+                serialem.UpdateLowDoseParams("R",1)
+                serialem.Record()
+                beam_diameter = serialem.MeasureBeamSize()
+                print(f"dia {beam_diameter} wanted {wanted_beam_diameter}")
 
         self.state.beam_radius = beam_diameter[0] / 2
         beam_image = np.asarray(serialem.bufferImage("A"))
