@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from types import SimpleNamespace
 import typer
 import glob
@@ -56,6 +56,7 @@ def main(
     ctx: DLContext,
     project: Path = typer.Option(None, help="Path to wanted project file",rich_help_panel="Expert Options"),
     acquisition_area_name: List[str] = typer.Option(None, help="List of acquisition areas names to process"),
+    acquisition_area_name_contains: Optional[str] = typer.Option(None, help="string that should be in acquisition area name"),
     select_condition: str = typer.Option(None, help="Condition to select acquisition areas"),
     match_template_job_id: int = typer.Option(None, help="ID of template match job"),
     cistem_path: str = typer.Option("/groups/cryoadmin/software/CISTEM/je_dev/", help="Path to cistem binaries"),
@@ -71,7 +72,9 @@ def main(
         project = Path(potential_projects[0])
     project_object = ProcessingProject.read(project)
     aas_to_process = project_object.acquisition_areas
-    if len(acquisition_area_name) > 0:
+    if acquisition_area_name_contains is not None:
+        aas_to_process = [aa for aa in project_object.acquisition_areas if acquisition_area_name_contains in aa.area_name]
+    if acquisition_area_name and len(acquisition_area_name) > 0:
         aas_to_process = [aa for aa in project_object.acquisition_areas if aa.area_name in acquisition_area_name]
     if select_condition is not None:
         conditions = process_experimental_conditions(aas_to_process)
