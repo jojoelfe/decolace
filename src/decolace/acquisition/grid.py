@@ -80,7 +80,7 @@ class grid:
             else:
                 serialem.OpenNewFile(self.state.view_file)
 
-    def eucentric(self, stage_height_offset=-64.5, do_euc=True):
+    def eucentric(self, stage_height_offset=-63.5, do_euc=True):
         serialem = connect_sem()
         print("Do")
         serialem.Copy("A", "K")  # Copy to buffer K
@@ -91,19 +91,19 @@ class grid:
         serialem.ResetImageShift()
         serialem.TiltTo(self.state.tilt)
         serialem.View()
-        serialem.Copy("A", "K")  # Copy to buffer K
-        serialem.MoveStage(0, 0, stage_height_offset / 3)
-        serialem.View()
-        serialem.AlignTo("K")
-        serialem.ResetImageShift()
-        serialem.MoveStage(0, 0, stage_height_offset / 3)
-        serialem.View()
-        serialem.AlignTo("K")
-        serialem.ResetImageShift()
-        serialem.MoveStage(0, 0, stage_height_offset / 3)
-        serialem.View()
-        serialem.AlignTo("K")
-        serialem.ResetImageShift()
+        #serialem.Copy("A", "K")  # Copy to buffer K
+        #serialem.MoveStage(0, 0, stage_height_offset / 3)
+        #serialem.View()
+        #serialem.AlignTo("K")
+        #serialem.ResetImageShift()
+        #serialem.MoveStage(0, 0, stage_height_offset / 3)
+        #serialem.View()
+        #serialem.AlignTo("K")
+        #serialem.ResetImageShift()
+        #serialem.MoveStage(0, 0, stage_height_offset / 3)
+        #serialem.View()
+        #serialem.AlignTo("K")
+        #serialem.ResetImageShift()
 
     def nice_view(self):
         serialem = connect_sem()

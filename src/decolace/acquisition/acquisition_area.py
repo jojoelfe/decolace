@@ -387,7 +387,7 @@ class AcquisitionAreaSingle:
             powerspectrum = np.asarray(serialem.bufferImage("AF"))
             fit_result = CtfFit.fit_1d(
                 powerspectrum,
-                pixel_size_angstrom=4.24,
+                pixel_size_angstrom=4.32,
                 voltage_kv=300.0,
                 spherical_aberration_mm=2.7,
                 amplitude_contrast=0.07)
@@ -428,11 +428,12 @@ class AcquisitionAreaSingle:
                 else:
                     num_max_correction = 0
             if num_max_correction > 2 and abs(true_offset) > offset_before_max_correction:
-                correction_attempt = -1.6 * true_offset
-                print(f"Overfocus, trying to correct by {correction_attempt} instead of {offset}")
-                offset = correction_attempt
+                #correction_attempt = -1.6 * true_offset
+                #print(f"Overfocus, trying to correct by {correction_attempt} instead of {offset}")
+                #offset = correction_attempt
                 
                 #report["potential_overfocus"] = True
+                pass
 
             if abs(offset) < 0.1 and not established_lock and last_bs_correction < 0.06:
                 established_lock = True
