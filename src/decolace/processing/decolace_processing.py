@@ -247,8 +247,7 @@ def calculate_diagonal_radius(box_size: int = 512) -> int:
 
 def distance_from_center_array(shape) -> np.ndarray:
     x, y = np.ogrid[0:shape[0], 0:shape[1]]
-    size = np.min(shape)
-    r = np.hypot(x - (size - 1) / 2, y - (size - 1) / 2)
+    r = np.hypot(x - (shape[0] - 1) / 2, y - (shape[1] - 1) / 2)
     return r
 
 def radial_average(spectrum: np.ndarray) -> np.ndarray:
@@ -307,7 +306,8 @@ def create_montage(montage_metadata: dict, output_path_montage: Path, erode_mask
         )
         #print(f"Opening took {time.perf_counter() - prev} seconds")
         prev = time.perf_counter()
-        if correct_dark_ring and tile.shape[0] > 4000 and tile.shape[1] > 4000:
+        #print(tile.shape)
+        if correct_dark_ring and np.abs(tile.shape[0] / tile.shape[1] - 1) < 0.1:
             ra = radial_average(tile)
             shape = tile.shape
             x, y = np.ogrid[0:shape[0], 0:shape[1]]
@@ -348,6 +348,7 @@ def create_montage(montage_metadata: dict, output_path_montage: Path, erode_mask
         existing_mask = 1.0 - mask_montage[insertion_slice]
         tile *= existing_mask
         mask_float *= existing_mask
+        print(np.sum(mask_float))
         mask_montage[insertion_slice] += mask_float
 
         # CHeck if the column tile_intensity_correction exists
@@ -811,3 +812,37 @@ def assemble_matches(montage_info, refine_info):
     )
     # Write the new starfile
     return info
+
+def create_tile_borders_overlay(montage_metadata: dict, output_path_overlay: Path, project_path: Path,erode_mask: int = 0):
+    import matplotlib.pyplot as plt
+    import numpy
+    import sqlite3
+
+    scale_factor = 500
+
+    w = montage_metadata["montage"]["montage_x_size"].values[0] / scale_factor
+    h = montage_metadata["montage"]["montage_y_size"].values[0] / scale_factor
+
+    fig = plt.figure(frameon=False)
+    fig.set_size_inches(w,h)
+    ax = plt.Axes(fig, [0., 0., 1., 1.])
+    ax.set_axis_off()
+    
+    
+    db = sqlite3.connect(project_path)
+    thickness_info = pd.read_sql_query("SELECT IMAGE_ASSETS.FILENAME, IMAGE_ASSETS.IMAGE_ASSET_ID, ESTIMATED_CTF_PARAMETERS.SAMPLE_THICKNESS, ESTIMATED_CTF_PARAMETERS.DETECTED_RING_RESOLUTION FROM ESTIMATED_CTF_PARAMETERS INNER JOIN IMAGE_ASSETS ON ESTIMATED_CTF_PARAMETERS.IMAGE_ASSET_ID = IMAGE_ASSETS.IMAGE_ASSET_ID", db)
+    info = montage_metadata['tiles'].merge(thickness_info, left_on='tile_filename', right_on='FILENAME')
+
+    x_centers = info['tile_x_offset_binned'] + info['tile_x_size'] / (2 * montage_metadata['montage']['montage_binning'][0])
+    y_centers = info['tile_y_offset_binned'] + info['tile_y_size'] / (2 * montage_metadata['montage']['montage_binning'][0])
+    
+    
+    ax.scatter(x_centers, y_centers, s=3000,facecolors='none', edgecolors='r')
+    # Write text into the plot
+    for i, txt in enumerate(info['SAMPLE_THICKNESS']):
+        ax.text(x_centers[i], y_centers[i], f"{info['IMAGE_ASSET_ID'][i]}: {txt:.2f}", color='r', fontsize=3)
+    ax.set_xlim(0, w * scale_factor)
+    ax.set_ylim(0, h * scale_factor)
+    fig.add_axes(ax)
+    fig.savefig(output_path_overlay, dpi=scale_factor)
+    plt.close()

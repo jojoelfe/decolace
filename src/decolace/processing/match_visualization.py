@@ -44,24 +44,30 @@ def render_image(path, engine = 'eevee', x = 1000, y = 1000):
     bpy.ops.render.render(write_still=True)
     #display(Image(filename=path))
 
-def render_aa(project, aa, mtj, filterset_name, output_path):
-
-    bpy.ops.wm.open_mainfile(filepath="/nrs/elferich/THP1_brequinar/ribosome.blend")
+def render_aa(project, aa, mtj, filterset_name, output_path, blender_template):
+    mn.register()
+    bpy.ops.wm.open_mainfile(filepath=str(blender_template))
 
     star_path = project.project_path / "Matches" /f"{aa.area_name}_{mtj.run_name}_{mtj.run_id}_filtered.star"
     if not star_path.exists():
         return
-    print(star_path)
-    obj = mn.star.load_star_file(file_path=str(star_path))
-    print(obj.name)
+    obj = mn.entities.ensemble.ui.load_starfile(file_path=str(star_path))
+    
+    
+    bpy.data.node_groups["MN_starfile_NewStarInstances"].nodes["Starfile Instances"].inputs[1].default_value = bpy.data.objects["Ribosome"]
+    bpy.data.node_groups["MN_starfile_NewStarInstances"].nodes["Starfile Instances"].inputs[5].default_value = True
+    bpy.data.node_groups["MN_starfile_NewStarInstances"].nodes["Starfile Instances"].inputs[9].default_value = 0.25
+    bpy.context.evaluated_depsgraph_get().update()
+    
     print(f"{list(bpy.data.images.keys())}")
     size = bpy.data.images[0].size
-
+    #size = (1000,1000)
     print(f"Image size: {size[0]}")
     major = max(size)
-    modifier = obj.modifiers["MolecularNodes"]
-    modifier["Input_8"] = -1000.0
-    modifier["Input_2"] = bpy.data.objects["Ribosome"]
+    bpy.data.node_groups["MN_starfile_NewStarInstances"].nodes["Starfile Instances"].inputs[5].default_value = False
     orient_camera((size[0]/20,size[1]/20,500), ortho_scale = major/10)
 
-    render_image(str(output_path), engine='eevee',x=int(size[0]),y=int(size[1]))
+    render_image(str(output_path), engine='cycles',x=int(size[0]),y=int(size[1]))
+    bpy.ops.wm.save_as_mainfile(filepath=str(output_path.parent / f"{output_path.stem}.blend"))
+    # Exit blender
+    bpy.ops.wm.quit_blender()

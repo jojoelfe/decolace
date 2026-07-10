@@ -34,13 +34,21 @@ def run_unblur(
     cmd_prefix: str = typer.Option("", help="Prefix of run command"),
     cmd_suffix: str = typer.Option("", help="Suffix of run command"),
     run_additional: Optional[str] = typer.Option(None, help="Run additional unblur runs"),
-    custom_binning_factor: Optional[float] = typer.Option(None, help="Custom binning factor for unblur")
+    custom_binning_factor: Optional[float] = typer.Option(None, help="Custom binning factor for unblur"),
+    unblur_command: Optional[str] = typer.Option("unblur", help="Unblur command"),
+    use_patch: bool = typer.Option(False, help="Use patch for unblur"),
+    run_missing: bool = typer.Option(False, help="Run only missing unblur runs"),
 ):
     """
     Run unblur for each acquisition area
     """
-    from pycistem.programs import unblur
+    if use_patch:
+        from pycistem.programs import unblur_patch as unblur
+    else:
+        from pycistem.programs import unblur
     import pycistem
+    import pandas as pd
+    import sqlite3
     pycistem.set_cistem_path(ctx.obj.cistem_path)
     logging.basicConfig(
         level=logging.DEBUG,
@@ -52,21 +60,54 @@ def run_unblur(
     )
     
     for aa in ctx.obj.acquisition_areas:
-        if aa.unblur_run and run_additional is None:
+        if aa.unblur_run and run_additional is None and not run_missing:
             continue
         typer.echo(f"Running unblur for {aa.area_name}")
-        pars = unblur.parameters_from_database(aa.cistem_project,decolace=True)
-        if run_additional is not None:
+        pars = unblur.parameters_from_database(aa.cistem_project,decolace=(not use_patch))
+        
+        if run_missing:
+            already_processed = pycistem.database.get_image_info_from_db(aa.cistem_project,get_ctf=False)
+            missing = []
             for par in pars:
-                par.output_filename = par.output_filename.replace("_auto_" , f"_auto_{run_additional}_")
-                par.amplitude_spectrum_filename = par.amplitude_spectrum_filename.replace("_auto.mrc" , f"_auto_{run_additional}.mrc")
-                par.small_sum_image_filename = par.small_sum_image_filename.replace("_auto.mrc" , f"_auto_{run_additional}.mrc")
+                if par.input_filename not in already_processed["movie_filename"].values:
+                    missing.append(par)
+            pars = missing
+        
+        try:
+            if run_additional is not None:
+                current_db = sqlite3.connect(aa.cistem_project)
+                bin1_pars = pars
+                pars = []
+                for par in bin1_pars:
+                    par.output_filename = par.output_filename.replace("_auto" , f"_auto_{run_additional}_")
+                    if Path(par.output_filename).exists():
+                        current_micrograph_info = pd.read_sql(f'SELECT * FROM MOVIE_ALIGNMENT_LIST WHERE OUTPUT_FILE="{par.output_filename}"', current_db)
+                        if len(current_micrograph_info) > 0:
+                            print(f"Output file {par.output_filename} already exists and in db. Skipping")
+                            continue
+                    par.amplitude_spectrum_filename = par.amplitude_spectrum_filename.replace("_auto.mrc" , f"_auto_{run_additional}.mrc")
+                    par.small_sum_image_filename = par.small_sum_image_filename.replace("_auto.mrc" , f"_auto_{run_additional}.mrc")
+                    pars.append(par)
+            if use_patch:
+                for par in pars:
+                    par.patchcorrection = True
+                    par.override_patchnum = True
+                    par.patch_num_x = 12
+                    par.patch_num_y = 10
+                    par.max_threads = 4
+        except Exception as e:
+            print(e)
+            continue
+        if len(pars) == 0:
+            continue
         if custom_binning_factor is not None:
             for par in pars:
                 par.output_binning_factor = custom_binning_factor
         
-
-        res = unblur.run(pars,num_procs=num_cores,cmd_prefix=cmd_prefix,cmd_suffix=cmd_suffix,save_output=True,save_output_path="/tmp/output")
+        if use_patch:
+            res = unblur.run(pars,num_procs=num_cores,cmd_prefix=cmd_prefix,cmd_suffix=cmd_suffix,save_output=True,save_output_path="/tmp/output",unblur_command=unblur_command,num_threads=4)
+        else:
+            res = unblur.run(pars,num_procs=num_cores,cmd_prefix=cmd_prefix,cmd_suffix=cmd_suffix,save_output=True,save_output_path="/tmp/output")
 
         unblur.write_results_to_database(aa.cistem_project,pars,res,change_image_assets=run_additional is None)
         if run_additional is None:
@@ -85,20 +126,40 @@ def run_ctffind(
     fit_nodes_brute_force: bool = typer.Option(True, help="Fit nodes brute force"),
     fit_nodes_lowres: float = typer.Option(30.0, help="Fit nodes lowres"),
     fit_nodes_highres: float = typer.Option(4.0, help="Fit nodes highres"),
+    run_missing: bool = typer.Option(False, help="Run only missing ctffind runs"),
 ):
     """
     Run ctffind for each acquisition area
     """
     from pycistem.programs import ctffind
     import pycistem
+    import pandas as pd
     pycistem.set_cistem_path(ctx.obj.cistem_path)
-  
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(message)s",
+        handlers=[
+            RichHandler(),
+            #logging.FileHandler(current_output_directory / "log.log")
+        ]
+    )
+
     for aa in ctx.obj.acquisition_areas:
-        if aa.ctffind_run:
+        if aa.ctffind_run and not run_missing:
             continue
         typer.echo(f"Running ctffind for {aa.area_name}")
         pars, image_info = ctffind.parameters_from_database(aa.cistem_project,decolace=True)
-
+        if run_missing:
+            already_processed = pycistem.database.get_image_info_from_db(aa.cistem_project,get_ctf=True)
+            missing = []
+            missing_image_info = []
+            for i, par in enumerate(pars):
+                if par.input_filename not in already_processed["movie_filename"].values:
+                    missing.append(par)
+                    missing_image_info.append(image_info.iloc[i])
+            pars = missing
+            image_info = pd.DataFrame(missing_image_info).reset_index(drop=True)
+            print(image_info)
         for par in pars:
             par.determine_tilt = tilt
             par.minimum_defocus = 10000

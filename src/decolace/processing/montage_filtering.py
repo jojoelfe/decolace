@@ -42,11 +42,13 @@ def subtract_linear_background_model(
     background = model.predict((np.array(X)/8).T).reshape(data.shape)   
 
     filtered_montage = data - background
-    filtered_montage -= np.mean(filtered_montage[np.where(mask > 0.99)])
-    filtered_montage /= 4 * np.std(filtered_montage[np.where(mask > 0.99)])
+    mad = np.median(np.abs(filtered_montage[np.where(mask > 0.99)] - np.median(filtered_montage[np.where(mask > 0.99)])))
+    filtered_montage -= np.median(filtered_montage[np.where(mask > 0.99)])
+    filtered_montage /= 8 * mad
     #filtered_montage *= 0.4
     filtered_montage += 0.5
     plt.hist(filtered_montage[np.where(mask > 0.99)], bins=100)
+    plt.xlim(-0.5,1.5)
     plt.savefig(output_path.parent / "histogram.png")
     plt.close()
     with mrcfile.new(output_path, overwrite=True) as mrc:

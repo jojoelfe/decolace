@@ -35,7 +35,7 @@ def run_matchtemplate(
         ]
     )
     run_profile = {
-            "prague":8,
+ #           "prague":8,
             "budapest":8,
             "helsinki":8,
             "palermo":8,
@@ -170,7 +170,7 @@ def run_refinetemplate(
             input_starfile=tm_package_file.as_posix(),
             output_starfile=tm_package_file.with_suffix('').as_posix()+'_refined.star',
             input_template=Path(ctx.obj.match_template_job.template_path).as_posix(),
-            num_threads=10,
+            num_threads=40,
         )
         if Path(par.output_starfile).exists():
             typer.echo(f"Refined tm package already exists for {aa.area_name}")
@@ -215,6 +215,38 @@ def assemble_matches(
             typer.echo(f"Not enough matches for {aa.area_name}")
             continue
         result = dp.assemble_matches(montage_data, matches_data)
+        if use_filtered_montage:
+            result["cisTEMOriginalImageFilename"] = result["cisTEMOriginalImageFilename"].str.replace(".mrc", "_filtered.mrc")
+        starfile.write(result, output_star_path, overwrite=True)
+
+@app.command()
+def assemble_matches_from_starfile(
+    ctx: typer.Context,
+    starfile_path: Path = typer.Argument(..., help="Path to the star file with matches"),
+    use_filtered_montage: bool = typer.Option(False, help="Use the filtered montage"),
+):
+    import starfile
+    import decolace.processing.decolace_processing as dp
+
+    matches_data = starfile.read(starfile_path)
+    for aa in ctx.obj.acquisition_areas:
+        typer.echo(f"Assembling matches for {aa.area_name}")
+        output_dir = Path(ctx.obj.project.project_path) / "Matches"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            montage_data = starfile.read(aa.montage_star)
+        except FileNotFoundError:
+            typer.echo(f"No montage found for {aa.area_name}")
+            continue
+        subset_matches = matches_data[matches_data["cisTEMOriginalImageFilename"].str.contains(aa.area_name)]
+        print (f"Found {len(subset_matches)} matches for {aa.area_name}")
+        if len(subset_matches) < 10:
+            typer.echo(f"Not enough matches for {aa.area_name}")
+            continue
+
+        output_star_path = output_dir / f"{aa.area_name}_{starfile_path.stem}_assembled.star"
+
+        result = dp.assemble_matches(montage_data, subset_matches)
         if use_filtered_montage:
             result["cisTEMOriginalImageFilename"] = result["cisTEMOriginalImageFilename"].str.replace(".mrc", "_filtered.mrc")
         starfile.write(result, output_star_path, overwrite=True)
@@ -328,7 +360,7 @@ def join_matches(
                 if not Path(new_filename).exists():
                     print(f"Ouch {new_filename} does not exist")
                     return
-            combined_matches.iloc[i,combined_matches.columns.get_loc('cisTEMOriginalImageFilename')] = "'"+str(new_filename)+"'"
+            combined_matches.iloc[i,combined_matches.columns.get_loc('cisTEMOriginalImageFilename')] = str(new_filename)
         if use_different_pixel_size is not None:
             combined_matches['cisTEMPixelSize'] = use_different_pixel_size
     starfile.write(combined_matches, combined_matches_starfile, overwrite=True, quote_character="'", quote_all_strings=True)
@@ -392,17 +424,23 @@ def convert_coordinates(
     original_micrograph_header = None
     for i, row in data.iterrows():
         project = Path(row["cisTEMOriginalImageFilename"].strip("'")).parent.parent.parent
-        cc = "'"
+        cc = "''"
         project = project / (str(project.name) +'.db')
         if project != current_project:
             current_project = project
             current_db = sqlite3.connect(current_project)
         if current_micrograph != row["cisTEMOriginalImageFilename"].strip(cc):
             current_micrograph = row["cisTEMOriginalImageFilename"].strip(cc)
+            print(row["cisTEMOriginalImageFilename"])
+            print(current_project)
             current_micrograph_info = pd.read_sql(f'SELECT * FROM MOVIE_ALIGNMENT_LIST WHERE OUTPUT_FILE="{current_micrograph}"', current_db).iloc[-1]
+            print(current_micrograph_info["PIXEL_SIZE"])
             with mrcfile.open(current_micrograph) as mrc:
                 current_micrograph_header = mrc.header
-            original_micrograph_info = pd.read_sql(f'SELECT * FROM MOVIE_ALIGNMENT_LIST WHERE ALIGNMENT_JOB_ID=1 AND MOVIE_ASSET_ID="{current_micrograph_info["MOVIE_ASSET_ID"]}"', current_db).iloc[-1]
+            try:
+                original_micrograph_info = pd.read_sql(f'SELECT * FROM MOVIE_ALIGNMENT_LIST WHERE ALIGNMENT_JOB_ID=1 AND MOVIE_ASSET_ID="{current_micrograph_info["MOVIE_ASSET_ID"]}"', current_db).iloc[-1]
+            except IndexError:
+                original_micrograph_info = pd.read_sql(f'SELECT * FROM MOVIE_ALIGNMENT_LIST WHERE ALIGNMENT_JOB_ID=2 AND MOVIE_ASSET_ID="{current_micrograph_info["MOVIE_ASSET_ID"]}"', current_db).iloc[-1]
             with mrcfile.open(original_micrograph_info["OUTPUT_FILE"].strip(cc)) as mrc:
                 original_micrograph_header = mrc.header
             #print(f' current: {current_micrograph_info["CROP_CENTER_X"]} {current_micrograph_info["CROP_CENTER_Y"]}')

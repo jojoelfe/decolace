@@ -28,7 +28,7 @@ def run_montage(
     mask_size_cutoff: int = typer.Option(100, help="If the mask size is smaller than this, the pair will be discarded"),
     overlap_ratio: float = typer.Option(0.2, help="Overlap ratio parameter for masked crosscorrelation"),
     redo: bool = typer.Option(False, help="Redo the montage even if it already exists"),
-    redo_montage: bool = typer.Option(False, help="Redo only the creatin of the montage even if it already exists"),
+    redo_montage: bool = typer.Option(False, help="Redo only the creation of the montage even if it already exists"),
     max_mean_density: Optional[float] = typer.Option(None, help="Maximum mean density of the tiles"),
     cc_cutoff_as_fraction_of_median: float = typer.Option(0.5, help="Cutoff for the cross-correlation as a fraction of the median cross-correlation"),
     debug: bool = typer.Option(False, help="Debug mode")
@@ -48,6 +48,8 @@ def run_montage(
         output_directory = ctx.obj.project.project_path / "Montages" / aa.area_name
         typer.echo(f"Running montage for {aa.area_name}")
         if aa.initial_tile_star is None or redo:
+            if aa.cistem_project is None:
+                continue
             cistem_data = read_data_from_cistem(aa.cistem_project)
             typer.echo(
                 f"Read data about {len(cistem_data)} tiles."
@@ -142,6 +144,23 @@ def run_montage(
         aa.montage_image = output_path_montage
         ctx.obj.project.write()
 
+@app.command()
+def create_tile_overlay(
+    ctx: typer.Context,
+):
+    from rich.console import Console
+    import starfile
+    from numpy.linalg import LinAlgError
+    import pandas as pd
+
+    console = Console()
+    
+    from decolace.processing.decolace_processing import create_tile_borders_overlay
+    import numpy as np
+    for i, aa in enumerate(ctx.obj.acquisition_areas):
+        output_directory = ctx.obj.project.project_path / "Montages" / aa.area_name
+        montage_metadata = starfile.read(output_directory / f"{aa.area_name}_montage_metadata.star")
+        create_tile_borders_overlay(montage_metadata, output_directory / f"{aa.area_name}_tile_overlay.png", project_path=aa.cistem_project)
 
 from enum import Enum
 class KnotsOptions(str, Enum):
