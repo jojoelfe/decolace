@@ -37,7 +37,8 @@ dependencies = [
   "mrcfile",
   "contrasttransferfunction",
   "pydantic",
-  "tsp-solver2"
+  "tsp-solver2",
+  "pycistem>=0.7"
 ]
 
 [project.scripts]
