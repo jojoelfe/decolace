@@ -3,7 +3,7 @@ from pathlib import Path
 
 import mdocfile
 import typer
-from pycistem.core import Project
+from pycistem.pycore import Project
 from rich.console import Console
 from datetime import datetime
 

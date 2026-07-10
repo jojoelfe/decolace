@@ -178,7 +178,7 @@ def run_ctffind(
 def update_database(
     project_main: Path = typer.Option(None, help="Path to wanted project file")
 ):
-    from pycistem.core import Project
+    from pycistem.pycore import Project
     import glob 
     from decolace.processing.project_managment import ProcessingProject
     if project_main is None:
